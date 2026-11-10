@@ -1,0 +1,95 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // =========================================================================
+    // Helper Functions
+    // =========================================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isInstructor() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'instructor';
+    }
+
+    function isMaxSizeMB(maxMb) {
+      return request.resource.size <= maxMb * 1024 * 1024;
+    }
+
+    // Ödev teslim dosyaları: PDF, ZIP veya Görsel (veya belge)
+    function isValidSubmissionFile() {
+      return request.resource.contentType.matches('application/pdf') ||
+             request.resource.contentType.matches('application/zip') ||
+             request.resource.contentType.matches('application/x-zip-compressed') ||
+             request.resource.contentType.matches('image/.*') ||
+             request.resource.contentType.matches('application/msword') ||
+             request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*');
+    }
+
+    function isValidImageFile() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isValidAudioFile() {
+      return request.resource.contentType.matches('audio/.*') ||
+             request.resource.contentType.matches('video/mp4') ||
+             request.resource.contentType.matches('application/octet-stream');
+    }
+
+    // =========================================================================
+    // 1. Ödev Teslim Dosyaları (/assignments/{assignmentId}/submissions/{studentId}/{fileName})
+    // Kural: Yalnızca oturum açmış kullanıcılar, PDF/ZIP/Görsel ve maksimum 25 MB
+    // =========================================================================
+    match /assignments/{assignmentId}/submissions/{studentId}/{fileName} {
+      allow read: if isAuthenticated() && (isOwner(studentId) || isInstructor());
+      allow create, update: if isAuthenticated() &&
+                            isOwner(studentId) &&
+                            isMaxSizeMB(25) &&
+                            isValidSubmissionFile();
+      allow delete: if isAuthenticated() && (isOwner(studentId) || isInstructor());
+    }
+
+    // =========================================================================
+    // 2. Eğitmen Sesli Geri Bildirim Dosyaları (/assignments/{assignmentId}/feedback_audio/{submissionId}/{fileName})
+    // =========================================================================
+    match /assignments/{assignmentId}/feedback_audio/{submissionId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow create, update: if isInstructor() &&
+                            isMaxSizeMB(15) &&
+                            isValidAudioFile();
+      allow delete: if isInstructor();
+    }
+
+    // =========================================================================
+    // 3. Forum Soru Fotoğrafları (/forum/{questionId}/{allPaths=**})
+    // Kural: Yalnızca oturum açmış (authenticated) kullanıcılar, görsel ve maksimum 5 MB
+    // =========================================================================
+    match /forum/{questionId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+                            isMaxSizeMB(5) &&
+                            isValidImageFile();
+      allow delete: if isAuthenticated();
+    }
+
+    // =========================================================================
+    // 4. Kullanıcı Profil Görselleri (/users/{userId}/avatar/{fileName})
+    // =========================================================================
+    match /users/{userId}/avatar/{fileName} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() &&
+                            isOwner(userId) &&
+                            isMaxSizeMB(5) &&
+                            isValidImageFile();
+      allow delete: if isAuthenticated() && (isOwner(userId) || isInstructor());
+    }
+  }
+}
