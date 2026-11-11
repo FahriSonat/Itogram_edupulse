@@ -291,9 +291,9 @@ class AttendanceRemoteDataSourceImpl implements AttendanceRemoteDataSource {
       final expectedQr = (sessionData['qrCodeToken'] ?? '').toString().trim();
       final trimmedCode = code.trim();
 
-      if (trimmedCode.isNotEmpty &&
-          trimmedCode != expectedPin &&
-          trimmedCode != expectedQr) {
+      // Boş kod asla kabul edilmez (aksi halde kod girmeden yoklama verilirdi).
+      if (trimmedCode.isEmpty ||
+          (trimmedCode != expectedPin && trimmedCode != expectedQr)) {
         throw Exception('Geçersiz PIN veya QR kodu.');
       }
 

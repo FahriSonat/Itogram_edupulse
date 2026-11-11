@@ -135,10 +135,6 @@ void main() {
         await expectLater(submit(code: ''), throwsA(isA<Exception>()));
         expect(studentStatus(), isNull);
       },
-      skip: 'BUG (Geliştirici 3): submitLiveAttendance içinde '
-          '"trimmedCode.isNotEmpty &&" koşulu yüzünden boş kod PIN/QR '
-          'kontrolünü atlıyor; öğrenci kod girmeden yoklama verebiliyor. '
-          'Düzeltilince skip kaldırılacak.',
     );
   });
 
