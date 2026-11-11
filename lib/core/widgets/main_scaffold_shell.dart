@@ -85,7 +85,9 @@ class MainScaffoldShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final router = GoRouter.maybeOf(context);
-    final activeRoute = currentRoute ?? router?.routeInformationProvider.value.uri.path;
+    final delegatePath = router?.routerDelegate.currentConfiguration.uri.path;
+    final infoPath = router?.routeInformationProvider.value.uri.path;
+    final activeRoute = currentRoute ?? ((delegatePath != null && delegatePath.isNotEmpty) ? delegatePath : infoPath);
     final resolvedIndex = currentIndex ?? (activeRoute != null ? indexForRoute(activeRoute) : 0);
     final safeIndex = resolvedIndex < 0 ? 0 : resolvedIndex.clamp(0, _tabs.length - 1);
     final resolvedRoute = activeRoute ?? tabRoutes[safeIndex];

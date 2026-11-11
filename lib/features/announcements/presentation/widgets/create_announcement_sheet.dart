@@ -54,7 +54,7 @@ class _CreateAnnouncementSheetState extends State<CreateAnnouncementSheet> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   AnnouncementType _type = AnnouncementType.general;
-  late String _target = widget.targets.first;
+  late String? _target = widget.targets.isEmpty ? null : widget.targets.first;
   DateTime _eventDate = DateTime.now().add(const Duration(days: 3));
   bool _isLoading = false;
 
@@ -95,7 +95,8 @@ class _CreateAnnouncementSheetState extends State<CreateAnnouncementSheet> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    final target = _target;
+    if (target == null || !_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
       await widget.onCreate(
@@ -103,7 +104,7 @@ class _CreateAnnouncementSheetState extends State<CreateAnnouncementSheet> {
         content: _contentController.text,
         type: _type,
         eventDate: _eventDate,
-        targetCourse: _target,
+        targetCourse: target,
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -129,93 +130,97 @@ class _CreateAnnouncementSheetState extends State<CreateAnnouncementSheet> {
           top: Radius.circular(AppDimensions.r24),
         ),
       ),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? AppColors.borderDark
-                        : AppColors.borderLight,
-                    borderRadius: AppDimensions.radiusFull,
+      child: SafeArea(
+        top: false,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AppColors.borderDark
+                          : AppColors.borderLight,
+                      borderRadius: AppDimensions.radiusFull,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: AppDimensions.p16),
-              const Text(
-                'Yeni Duyuru / Etkinlik',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: AppDimensions.p16),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final t in AnnouncementType.values.where(
-                    (t) => t != AnnouncementType.urgent,
-                  ))
-                    ChoiceChip(
-                      avatar: Icon(
-                        announcementTypeIcon(t),
-                        size: 16,
-                        color: AppColors.forAnnouncementType(t),
-                      ),
-                      label: Text(AppStrings.announcementType(t)),
-                      selected: _type == t,
-                      onSelected: (_) => setState(() => _type = t),
-                    ),
-                ],
-              ),
-              const SizedBox(height: AppDimensions.p12),
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(labelText: 'Başlık'),
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Başlık zorunludur'
-                    : null,
-              ),
-              const SizedBox(height: AppDimensions.p12),
-              TextFormField(
-                controller: _contentController,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Açıklama'),
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Açıklama zorunludur'
-                    : null,
-              ),
-              const SizedBox(height: AppDimensions.p12),
-              DropdownButtonFormField<String>(
-                initialValue: _target,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Hedef Kitle'),
-                items: [
-                  for (final t in widget.targets)
-                    DropdownMenuItem(value: t, child: Text(t)),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => _target = v);
-                },
-              ),
-              const SizedBox(height: AppDimensions.p12),
-              OutlinedButton.icon(
-                onPressed: _pickDate,
-                icon: const Icon(Icons.event_rounded),
-                label: Text('Etkinlik tarihi: ${_formatDateTime(_eventDate)}'),
-              ),
-              const SizedBox(height: AppDimensions.p20),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _submit,
-                child: Text(
-                  _isLoading ? 'Yayınlanıyor...' : 'Duyuruyu Yayınla',
+                const SizedBox(height: AppDimensions.p16),
+                const Text(
+                  'Yeni Duyuru / Etkinlik',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
-              ),
-            ],
+                const SizedBox(height: AppDimensions.p16),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final t in AnnouncementType.values.where(
+                      (t) => t != AnnouncementType.urgent,
+                    ))
+                      ChoiceChip(
+                        avatar: Icon(
+                          announcementTypeIcon(t),
+                          size: 16,
+                          color: AppColors.forAnnouncementType(t),
+                        ),
+                        label: Text(AppStrings.announcementType(t)),
+                        selected: _type == t,
+                        onSelected: (_) => setState(() => _type = t),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppDimensions.p12),
+                TextFormField(
+                  controller: _titleController,
+                  decoration: const InputDecoration(labelText: 'Başlık'),
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Başlık zorunludur'
+                      : null,
+                ),
+                const SizedBox(height: AppDimensions.p12),
+                TextFormField(
+                  controller: _contentController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: 'Açıklama'),
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Açıklama zorunludur'
+                      : null,
+                ),
+                const SizedBox(height: AppDimensions.p12),
+                DropdownButtonFormField<String>(
+                  initialValue: _target,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Hedef Kitle'),
+                  validator: (v) => v == null ? 'Hedef kitle seçiniz' : null,
+                  items: [
+                    for (final t in widget.targets)
+                      DropdownMenuItem(value: t, child: Text(t)),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => _target = v);
+                  },
+                ),
+                const SizedBox(height: AppDimensions.p12),
+                OutlinedButton.icon(
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.event_rounded),
+                  label: Text('Etkinlik tarihi: ${_formatDateTime(_eventDate)}'),
+                ),
+                const SizedBox(height: AppDimensions.p20),
+                ElevatedButton(
+                  onPressed: _isLoading || _target == null ? null : _submit,
+                  child: Text(
+                    _isLoading ? 'Yayınlanıyor...' : 'Duyuruyu Yayınla',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

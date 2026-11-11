@@ -123,7 +123,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-/// Aktif rol rozeti: `ÖĞRENCİ PORTALI` (mavi) / `EĞİTMEN YÖNETİM PANELİ` (mor).
+/// Aktif rol rozeti: `ÖĞRENCİ PORTALI` (mavi) / `EĞİTMEN YÖNETİM PANELİ` (mor) / `YÖNETİCİ PANELİ` (camgöbeği).
 class RoleBadge extends StatelessWidget {
   const RoleBadge({super.key, required this.role});
 
@@ -132,12 +132,28 @@ class RoleBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isStudent = role == UserRole.student;
-    final badgeColor = isStudent ? AppColors.studentRoleBadge : AppColors.instructorRoleBadge;
+    final (badgeColor, lightBg, darkBg, icon) = switch (role) {
+      UserRole.student => (
+        AppColors.studentRoleBadge,
+        AppColors.studentRoleBackground,
+        const Color(0xFF1E3A8A),
+        Icons.school_rounded,
+      ),
+      UserRole.instructor => (
+        AppColors.instructorRoleBadge,
+        AppColors.instructorRoleBackground,
+        const Color(0xFF4C1D95),
+        Icons.admin_panel_settings_rounded,
+      ),
+      UserRole.admin => (
+        AppColors.infoBlue,
+        const Color(0xFFE0F2FE),
+        const Color(0xFF0C4A6E),
+        Icons.verified_user_rounded,
+      ),
+    };
     final textColor = isDark ? Color.lerp(badgeColor, Colors.white, 0.35)! : badgeColor;
-    final bgColor = isStudent
-        ? (isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.4) : AppColors.studentRoleBackground)
-        : (isDark ? const Color(0xFF4C1D95).withValues(alpha: 0.4) : AppColors.instructorRoleBackground);
+    final bgColor = isDark ? darkBg.withValues(alpha: 0.4) : lightBg;
     final label = AppStrings.portalBadge(role);
 
     // Tam metin her zaman gösterilir; dar ekranlarda başlığa yer bırakmak için
@@ -163,11 +179,7 @@ class RoleBadge extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      isStudent ? Icons.school_rounded : Icons.admin_panel_settings_rounded,
-                      size: 13,
-                      color: textColor,
-                    ),
+                    Icon(icon, size: 13, color: textColor),
                     const SizedBox(width: 4),
                     Text(
                       label,

@@ -89,8 +89,11 @@ class AppDrawerMenu extends StatelessWidget {
 
   /// Kampüs sahnesi "kapak" + üstüne binen avatar + kimlik bilgileri.
   Widget _buildProfileHeader(BuildContext context, bool isDark) {
-    final isStudent = userRole == UserRole.student;
-    final roleColor = isStudent ? AppColors.studentRoleBadge : AppColors.instructorRoleBadge;
+    final roleColor = switch (userRole) {
+      UserRole.student => AppColors.studentRoleBadge,
+      UserRole.instructor => AppColors.instructorRoleBadge,
+      UserRole.admin => AppColors.infoBlue,
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -11,12 +11,13 @@ class ThemeCubit extends Cubit<ThemeMode> {
   }
 
   final LocalStorageService _storage;
+  bool _hasExplicitUpdate = false;
 
   /// [LocalStorageService]'te kayıtlı tema tercihini okuyup uygular.
   Future<void> loadSavedTheme() async {
     try {
       final raw = await _storage.getThemeMode(defaultMode: 'light');
-      if (isClosed) return;
+      if (isClosed || _hasExplicitUpdate) return;
       emit(_parseThemeMode(raw));
     } catch (_) {
       // Depolama okunamazsa varsayılan açık tema korunur.
@@ -44,6 +45,7 @@ class ThemeCubit extends Cubit<ThemeMode> {
   /// Belirli bir [ThemeMode] uygular ve kalıcı olarak kaydeder.
   Future<void> setTheme(ThemeMode mode) async {
     if (isClosed) return;
+    _hasExplicitUpdate = true;
     emit(mode);
     try {
       await _storage.saveThemeMode(_serializeThemeMode(mode));

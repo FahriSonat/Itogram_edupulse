@@ -19,9 +19,11 @@ class PortalAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final ringColors = (role == UserRole.student)
-        ? const [Color(0xFF3B82F6), Color(0xFF14B8A6)]
-        : const [Color(0xFF6366F1), Color(0xFFA855F7)];
+    final ringColors = switch (role) {
+      UserRole.student => const [Color(0xFF3B82F6), Color(0xFF14B8A6)],
+      UserRole.instructor => const [Color(0xFF6366F1), Color(0xFFA855F7)],
+      UserRole.admin => const [Color(0xFF0284C7), Color(0xFF14B8A6)],
+    };
     final innerColors = isDark
         ? const [Color(0xFF26355E), Color(0xFF16213F)]
         : const [Color(0xFFFFF3E6), Color(0xFFE6EEFF)];
@@ -33,9 +35,15 @@ class PortalAvatar extends StatelessWidget {
       ),
     );
 
+    final semanticLabel = switch (role) {
+      UserRole.student => 'Öğrenci avatarı',
+      UserRole.instructor => 'Eğitmen avatarı',
+      UserRole.admin => 'Yönetici avatarı',
+    };
+
     return Semantics(
       image: true,
-      label: (role == UserRole.student) ? 'Öğrenci avatarı' : 'Eğitmen avatarı',
+      label: semanticLabel,
       child: Container(
         width: size,
         height: size,
