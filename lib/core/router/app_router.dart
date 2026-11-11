@@ -1,5 +1,6 @@
 import '../di/injection_container.dart';
 
+import 'package:itogram_edupulse/core/router/go_router_refresh_stream.dart';
 import 'package:itogram_edupulse/core/router/role_guard.dart';
 import 'package:itogram_edupulse/core/router/route_names.dart';
 import 'package:itogram_edupulse/core/widgets/main_scaffold_shell.dart';

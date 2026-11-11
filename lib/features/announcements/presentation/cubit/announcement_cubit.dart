@@ -85,10 +85,13 @@ class AnnouncementCubit extends Cubit<AnnouncementState> {
   ) {
     return list.where((item) {
       final matchesType = type == null || item.type == type;
+      final eventDate = item.eventDate;
+      // Tarihsiz duyurular yalnızca "tüm günler" seçiliyken listelenir.
       final matchesDate = date == null ||
-          (item.eventDate.year == date.year &&
-              item.eventDate.month == date.month &&
-              item.eventDate.day == date.day);
+          (eventDate != null &&
+              eventDate.year == date.year &&
+              eventDate.month == date.month &&
+              eventDate.day == date.day);
       return matchesType && matchesDate;
     }).toList();
   }

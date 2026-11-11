@@ -1,4 +1,3 @@
-import 'dart:ui';
 
 import 'package:itogram_edupulse/app.dart';
 import 'package:itogram_edupulse/core/config/firebase_options.dart';
@@ -31,7 +30,7 @@ Future<void> main() async {
   await initDependencies();
 
   // 7) FCM + yerel bildirim kurulumu (Dev3'ün servisi)
-  await sl<FCMNotificationService>().initialize();
+  await sl<FcmNotificationService>().initialize();
 
   // 8) Uygulama
   runApp(const EduPulseApp());
