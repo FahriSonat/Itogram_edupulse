@@ -169,4 +169,51 @@ class AssignmentRepositoryImpl implements AssignmentRepository {
       audioFeedbackUrl: resolvedAudioUrl,
     );
   }
+
+  @override
+  Future<String> uploadAudioFeedback({
+    required String assignmentId,
+    required String submissionId,
+    required String localFilePath,
+  }) {
+    final file = File(localFilePath);
+    return _storageDataSource.uploadInstructorAudioFeedback(
+      assignmentId: assignmentId,
+      submissionId: submissionId,
+      fileName: file.uri.pathSegments.last,
+      audioFile: file,
+    );
+  }
+
+  @override
+  Stream<double> uploadSubmissionWithProgress(SubmissionEntity submission) async* {
+    if (!await _networkInfo.isConnected) {
+      throw Exception('İnternet bağlantısı bulunamadı.');
+    }
+    String? downloadUrl;
+    await for (final event in _storageDataSource.watchSubmissionFileUpload(
+      assignmentId: submission.assignmentId,
+      studentId: submission.studentUid,
+      fileName: submission.fileName,
+      file: File(submission.fileUrl),
+    )) {
+      if (event.isCompleted) downloadUrl = event.downloadUrl;
+      yield event.progress;
+    }
+    if (downloadUrl == null) throw Exception('Dosya yüklenemedi.');
+
+    // URL artık http(s) olduğu için uploadSubmission dosyayı tekrar yüklemez.
+    await uploadSubmission(SubmissionEntity(
+      submissionId: submission.submissionId,
+      assignmentId: submission.assignmentId,
+      studentUid: submission.studentUid,
+      studentName: submission.studentName,
+      fileUrl: downloadUrl,
+      fileName: submission.fileName,
+      submittedAt: submission.submittedAt,
+      status: submission.status,
+      isLatePenaltyApplied: submission.isLatePenaltyApplied,
+    ));
+    yield 1.0;
+  }
 }

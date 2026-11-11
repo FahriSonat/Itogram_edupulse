@@ -59,4 +59,16 @@ class GradesRepositoryImpl implements GradesRepository {
 
     await _remoteDataSource.deleteStudentGrade(gradeId, courseId);
   }
+
+  @override
+  Future<List<({String uid, String name, String studentNo})>> getRegisteredStudents() async {
+    final raw = await _remoteDataSource.getRegisteredStudents();
+    return raw
+        .map((Map<String, dynamic> d) => (
+              uid: (d['uid'] ?? '').toString(),
+              name: (d['fullName'] ?? '').toString(),
+              studentNo: (d['studentOrStaffNo'] ?? d['studentNo'] ?? '').toString(),
+            ))
+        .toList();
+  }
 }

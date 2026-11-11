@@ -8,4 +8,7 @@ abstract class GradesRepository {
   Future<void> manageStudentGrade(CourseGradeEntity grade);
   
   Future<void> deleteStudentGrade(String gradeId, String courseId);
+
+  /// Eğitmenin not girişi için sistemdeki kayıtlı öğrenciler.
+  Future<List<({String uid, String name, String studentNo})>> getRegisteredStudents();
 }

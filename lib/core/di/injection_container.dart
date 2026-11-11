@@ -7,6 +7,48 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../features/assignments/data/datasources/assignment_remote_datasource.dart';
+import '../../features/assignments/data/datasources/assignment_storage_datasource.dart';
+import '../../features/assignments/data/repositories/assignment_repository_impl.dart';
+import '../../features/assignments/domain/repositories/assignment_repository.dart';
+import '../../features/assignments/domain/usecases/create_assignment_usecase.dart';
+import '../../features/assignments/domain/usecases/grade_and_feedback_usecase.dart';
+import '../../features/assignments/domain/usecases/upload_assignment_submission_usecase.dart';
+import '../../features/assignments/presentation/cubit/assignment_cubit.dart';
+import '../../features/attendance/data/datasources/attendance_remote_datasource.dart';
+import '../../features/attendance/data/repositories/attendance_repository_impl.dart';
+import '../../features/attendance/domain/repositories/attendance_repository.dart';
+import '../../features/attendance/domain/usecases/evaluate_absence_risk_usecase.dart';
+import '../../features/attendance/domain/usecases/generate_60s_qr_pin_usecase.dart';
+import '../../features/attendance/domain/usecases/manage_attendance_record_usecase.dart';
+import '../../features/attendance/domain/usecases/submit_live_attendance_usecase.dart';
+import '../../features/attendance/domain/usecases/watch_live_attendance_roster_usecase.dart';
+import '../../features/attendance/presentation/cubit/absence_control_cubit.dart';
+import '../../features/attendance/presentation/cubit/live_attendance_cubit.dart';
+import '../../features/forum/data/datasources/forum_remote_datasource.dart';
+import '../../features/forum/data/repositories/forum_repository_impl.dart';
+import '../../features/forum/domain/repositories/forum_repository.dart';
+import '../../features/forum/domain/usecases/ask_question_with_photo_usecase.dart';
+import '../../features/forum/domain/usecases/mark_answer_as_resolved_usecase.dart';
+import '../../features/forum/domain/usecases/post_forum_answer_usecase.dart';
+import '../../features/forum/domain/usecases/watch_forum_questions_usecase.dart';
+import '../../features/forum/presentation/cubit/forum_cubit.dart';
+import '../../features/grades/data/datasources/grades_remote_datasource.dart';
+import '../../features/grades/data/repositories/grades_repository_impl.dart';
+import '../../features/grades/domain/repositories/grades_repository.dart';
+import '../../features/grades/domain/usecases/calculate_gpa_simulation_usecase.dart';
+import '../../features/grades/domain/usecases/manage_student_grade_usecase.dart';
+import '../../features/grades/domain/usecases/watch_student_grades_usecase.dart';
+import '../../features/grades/presentation/cubit/grades_cubit.dart';
+import '../../features/schedule/data/datasources/schedule_remote_datasource.dart';
+import '../../features/schedule/data/repositories/schedule_repository_impl.dart';
+import '../../features/schedule/domain/repositories/schedule_repository.dart';
+import '../../features/schedule/domain/usecases/add_or_remove_course_usecase.dart';
+import '../../features/schedule/domain/usecases/update_course_details_usecase.dart';
+import '../../features/schedule/domain/usecases/watch_weekly_schedule_usecase.dart';
+import '../../features/schedule/presentation/cubit/schedule_cubit.dart';
+import '../services/audio_recorder_service.dart';
+import '../services/file_picker_service.dart';
 import '../../features/announcements/data/datasources/announcement_remote_datasource.dart';
 import '../../features/announcements/data/repositories/announcement_repository_impl.dart';
 import '../../features/announcements/domain/repositories/announcement_repository.dart';
@@ -89,7 +131,8 @@ void _initCoreServices() {
   sl.registerLazySingleton<NetworkInfo>(() => NetworkInfoImpl(localStorageService: sl()));
   sl.registerLazySingleton<AnalyticsService>(() => AnalyticsService(analytics: sl(), crashlytics: sl()));
   sl.registerLazySingleton<FcmNotificationService>(() => FcmNotificationService(firebaseMessaging: sl()));
-  // TODO(Dev3): FilePickerService ve AudioRecorderService kayıtları.
+  sl.registerLazySingleton<FilePickerService>(() => FilePickerService());
+  sl.registerLazySingleton<AudioRecorderService>(() => AudioRecorderService());
 
   // ThemeCubit: MultiBlocProvider ile aynı örnek kullanılmalı -> LazySingleton.
   sl.registerLazySingleton<ThemeCubit>(() => ThemeCubit(sl()));
@@ -127,14 +170,14 @@ void _initAuth() {
   sl.registerLazySingleton(() => GetCurrentUserUseCase(sl()));
   sl.registerLazySingleton(() => LogoutUseCase(sl()));
   // Cubit (Dev5) — GoRouter (RoleGuard) ile aynı örnek -> LazySingleton.
-  // Oluşturulur oluşturulmaz oturumu kontrol eder; Splash bekleme durumundan çıkar.
+  // Oturum kontrolünü (checkAuthStatus) SplashPage başlatır.
   sl.registerLazySingleton<AuthCubit>(() => AuthCubit(
         loginWithStudentNoUseCase: sl(),
         registerUserUseCase: sl(),
         sendPasswordResetMailUseCase: sl(),
         getCurrentUserUseCase: sl(),
         logoutUseCase: sl(),
-      )..checkAuthStatus());
+      ));
 }
 
 void _initAnnouncements() {
@@ -157,21 +200,94 @@ void _initAnnouncements() {
 }
 
 void _initSchedule() {
-  // TODO(Dev3, Dev5)
+  sl.registerLazySingleton<ScheduleRemoteDataSource>(() => ScheduleRemoteDataSourceImpl(firestore: sl()));
+  sl.registerLazySingleton<ScheduleRepository>(
+      () => ScheduleRepositoryImpl(remoteDataSource: sl(), networkInfo: sl()));
+  sl.registerLazySingleton(() => WatchWeeklyScheduleUseCase(sl()));
+  sl.registerLazySingleton(() => AddOrRemoveCourseUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateCourseDetailsUseCase(sl()));
+  sl.registerFactory(() => ScheduleCubit(
+        watchWeeklyScheduleUseCase: sl(),
+        addOrRemoveCourseUseCase: sl(),
+        updateCourseDetailsUseCase: sl(),
+      ));
 }
 
 void _initAttendance() {
-  // TODO(Dev3, Dev5)
+  sl.registerLazySingleton<AttendanceRemoteDataSource>(() => AttendanceRemoteDataSourceImpl(firestore: sl()));
+  sl.registerLazySingleton<AttendanceRepository>(() => AttendanceRepositoryImpl(
+        remoteDataSource: sl(),
+        networkInfo: sl(),
+        analyticsService: sl(),
+        fcmNotificationService: sl(),
+      ));
+  sl.registerLazySingleton(() => Generate60sQrPinUseCase(sl()));
+  sl.registerLazySingleton(() => SubmitLiveAttendanceUseCase(sl()));
+  sl.registerLazySingleton(() => WatchLiveAttendanceRosterUseCase(sl()));
+  sl.registerLazySingleton(() => ManageAttendanceRecordUseCase(sl()));
+  sl.registerLazySingleton(() => EvaluateAbsenceRiskUseCase(sl()));
+  sl.registerFactory(() => LiveAttendanceCubit(
+        generate60sQrPinUseCase: sl(),
+        submitLiveAttendanceUseCase: sl(),
+        watchLiveAttendanceRosterUseCase: sl(),
+        manageAttendanceRecordUseCase: sl(),
+      ));
+  // Schedule ve Grades use case'lerine de bağlıdır; GetIt tembel çözdüğü
+  // için kayıt sırası önemli değildir.
+  sl.registerFactory(() => AbsenceControlCubit(
+        watchWeeklyScheduleUseCase: sl(),
+        evaluateAbsenceRiskUseCase: sl(),
+        manageAttendanceRecordUseCase: sl(),
+        watchStudentGradesUseCase: sl(),
+      ));
 }
 
 void _initAssignments() {
-  // TODO(Dev3, Dev5)
+  sl.registerLazySingleton<AssignmentRemoteDataSource>(() => AssignmentRemoteDataSourceImpl(firestore: sl()));
+  sl.registerLazySingleton<AssignmentStorageDataSource>(() => AssignmentStorageDataSourceImpl(storage: sl()));
+  sl.registerLazySingleton<AssignmentRepository>(() => AssignmentRepositoryImpl(
+        remoteDataSource: sl(),
+        storageDataSource: sl(),
+        networkInfo: sl(),
+        analyticsService: sl(),
+      ));
+  sl.registerLazySingleton(() => CreateAssignmentUseCase(sl()));
+  sl.registerLazySingleton(() => UploadAssignmentSubmissionUseCase(sl()));
+  sl.registerLazySingleton(() => GradeAndFeedbackUseCase(sl()));
+  sl.registerFactory(() => AssignmentCubit(
+        watchWeeklyScheduleUseCase: sl(),
+        createAssignmentUseCase: sl(),
+        uploadAssignmentSubmissionUseCase: sl(),
+        gradeAndFeedbackUseCase: sl(),
+        audioRecorderService: sl(),
+      ));
 }
 
 void _initGrades() {
-  // TODO(Dev3, Dev5)
+  sl.registerLazySingleton<GradesRemoteDataSource>(() => GradesRemoteDataSourceImpl(firestore: sl()));
+  sl.registerLazySingleton<GradesRepository>(() => GradesRepositoryImpl(remoteDataSource: sl(), networkInfo: sl()));
+  sl.registerLazySingleton(() => WatchStudentGradesUseCase(sl()));
+  sl.registerLazySingleton(() => ManageStudentGradeUseCase(sl()));
+  sl.registerLazySingleton(() => const CalculateGpaSimulationUseCase());
+  sl.registerFactory(() => GradesCubit(
+        watchStudentGradesUseCase: sl(),
+        manageStudentGradeUseCase: sl(),
+        calculateGpaSimulationUseCase: sl(),
+        watchWeeklyScheduleUseCase: sl(),
+      ));
 }
 
 void _initForum() {
-  // TODO(Dev3, Dev5)
+  sl.registerLazySingleton<ForumRemoteDataSource>(() => ForumRemoteDataSourceImpl(firestore: sl(), storage: sl()));
+  sl.registerLazySingleton<ForumRepository>(() => ForumRepositoryImpl(remoteDataSource: sl(), networkInfo: sl()));
+  sl.registerLazySingleton(() => WatchForumQuestionsUseCase(sl()));
+  sl.registerLazySingleton(() => AskQuestionWithPhotoUseCase(sl()));
+  sl.registerLazySingleton(() => PostForumAnswerUseCase(sl()));
+  sl.registerLazySingleton(() => MarkAnswerAsResolvedUseCase(sl()));
+  sl.registerFactory(() => ForumCubit(
+        watchForumQuestionsUseCase: sl(),
+        askQuestionWithPhotoUseCase: sl(),
+        postForumAnswerUseCase: sl(),
+        markAnswerAsResolvedUseCase: sl(),
+      ));
 }

@@ -105,8 +105,9 @@ class CourseGradeDetailCard extends StatelessWidget {
             ),
             if (isInstructor) ...[
               const SizedBox(height: AppDimensions.p10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              // Wrap: dar ekran / büyük yazıda butonlar taşmak yerine alt satıra geçer.
+              Wrap(
+                alignment: WrapAlignment.end,
                 children: [
                   TextButton.icon(
                     onPressed: onEdit,

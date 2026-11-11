@@ -78,9 +78,13 @@ class AnnouncementCard extends StatelessWidget {
                   const Spacer(),
                   Icon(Icons.event_outlined, size: 14, color: muted),
                   const SizedBox(width: 4),
-                  Text(
-                    formatDate(eventDate),
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: muted),
+                  Flexible(
+                    child: Text(
+                      formatDate(eventDate),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: muted),
+                    ),
                   ),
                 ],
               ),

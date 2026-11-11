@@ -23,6 +23,13 @@ class RouteNames {
   static String submissionGradingPath(String submissionId) =>
       '$submissionGradingBase/$submissionId';
 
+  /// Forum soru detayı. Tam yol: /forum/question/:questionId
+  /// (Rota app_router.dart'a /forum altına alt rota olarak eklenecek.)
+  static const String forumQuestionBase = '/forum/question';
+  static const String forumQuestionParam = 'questionId';
+
+  static String forumQuestionPath(String questionId) => '$forumQuestionBase/$questionId';
+
   // ---- Name ----
   static const String splashName = 'splash';
   static const String loginName = 'login';
