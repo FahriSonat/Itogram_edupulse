@@ -33,6 +33,7 @@ class CourseGradeModel extends CourseGradeEntity {
       letterGrade: json['letterGrade'] != null
           ? LetterGrade.values.firstWhere(
               (e) => e.name == json['letterGrade'],
+              orElse: () => LetterGrade.FF,
             )
           : null,
     );
