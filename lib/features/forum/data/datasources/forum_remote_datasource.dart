@@ -3,19 +3,20 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../../../../core/constants/firestore_paths.dart';
-import '../../../../core/enums/user_role.dart';
+import '../models/forum_answer_model.dart';
+import '../models/forum_question_model.dart';
 
 /// Öğrencinin çektiği soru fotoğrafını Firebase Storage'a yükler, soru ve etiketleri
 /// Firestore `forum_questions` koleksiyonuna yazar.
 /// Eğitmen bir yanıtı "Çözüldü" olarak işaretlediğinde Atomik Batch Write ile
 /// hem yanıtı `isInstructorApproved = true` hem de soruyu `isResolved = true` olarak günceller.
 abstract class ForumRemoteDataSource {
-  Stream<List<Map<String, dynamic>>> watchForumQuestions({
-    String? courseId,
-    bool? onlyResolved,
+  Stream<List<ForumQuestionModel>> watchForumQuestions({
+    String? courseTag,
+    String? topicTag,
   });
 
-  Stream<List<Map<String, dynamic>>> watchQuestionAnswers(String questionId);
+  Future<void> askQuestionWithPhoto(ForumQuestionModel question);
 
   Future<String> uploadQuestionPhoto({
     required String questionId,
@@ -24,35 +25,11 @@ abstract class ForumRemoteDataSource {
     Uint8List? photoBytes,
   });
 
-  Future<Map<String, dynamic>> askQuestionWithPhoto({
-    required String title,
-    required String content,
-    required String authorId,
-    required String authorName,
-    required UserRole authorRole,
-    String? courseId,
-    String? courseName,
-    List<String> tags = const [],
-    File? photoFile,
-    Uint8List? photoBytes,
-    String? photoFileName,
-  });
+  Stream<List<ForumAnswerModel>> watchForumAnswers(String questionId);
 
-  Future<Map<String, dynamic>> postForumAnswer({
-    required String questionId,
-    required String content,
-    required String authorId,
-    required String authorName,
-    required UserRole authorRole,
-  });
+  Future<void> postForumAnswer(String questionId, ForumAnswerModel answer);
 
-  /// Atomik Batch Write ile hem yanıtı `isInstructorApproved = true`
-  /// hem de soruyu `isResolved = true` olarak günceller.
-  Future<void> markAnswerAsResolved({
-    required String questionId,
-    required String answerId,
-    bool isResolved = true,
-  });
+  Future<void> markAnswerAsResolved(String questionId, String answerId);
 }
 
 class ForumRemoteDataSourceImpl implements ForumRemoteDataSource {
@@ -72,41 +49,23 @@ class ForumRemoteDataSourceImpl implements ForumRemoteDataSource {
       _firestore.collection(FirestorePaths.forumAnswers(questionId));
 
   @override
-  Stream<List<Map<String, dynamic>>> watchForumQuestions({
-    String? courseId,
-    bool? onlyResolved,
+  Stream<List<ForumQuestionModel>> watchForumQuestions({
+    String? courseTag,
+    String? topicTag,
   }) {
     Query<Map<String, dynamic>> query = _questionsRef;
 
-    if (courseId != null && courseId.isNotEmpty) {
-      query = query.where('courseId', isEqualTo: courseId);
+    if (courseTag != null && courseTag.isNotEmpty) {
+      query = query.where('courseTag', isEqualTo: courseTag);
     }
-    if (onlyResolved != null) {
-      query = query.where('isResolved', isEqualTo: onlyResolved);
+    if (topicTag != null && topicTag.isNotEmpty) {
+      query = query.where('topicTag', isEqualTo: topicTag);
     }
-
-    query = query.orderBy('createdAt', descending: true);
 
     return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = Map<String, dynamic>.from(doc.data());
-        data['id'] = doc.id;
-        return _normalizeMap(data);
-      }).toList();
-    });
-  }
-
-  @override
-  Stream<List<Map<String, dynamic>>> watchQuestionAnswers(String questionId) {
-    return _answersRef(questionId)
-        .orderBy('createdAt', descending: false)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = Map<String, dynamic>.from(doc.data());
-        data['id'] = doc.id;
-        return _normalizeMap(data);
-      }).toList();
+      return snapshot.docs
+          .map((doc) => ForumQuestionModel.fromFirestore(doc.data(), doc.id))
+          .toList();
     });
   }
 
@@ -136,126 +95,73 @@ class ForumRemoteDataSourceImpl implements ForumRemoteDataSource {
   }
 
   @override
-  Future<Map<String, dynamic>> askQuestionWithPhoto({
-    required String title,
-    required String content,
-    required String authorId,
-    required String authorName,
-    required UserRole authorRole,
-    String? courseId,
-    String? courseName,
-    List<String> tags = const [],
-    File? photoFile,
-    Uint8List? photoBytes,
-    String? photoFileName,
-  }) async {
-    final docRef = _questionsRef.doc();
-    String? imageUrl;
+  Future<void> askQuestionWithPhoto(ForumQuestionModel question) async {
+    final docRef = question.questionId.isNotEmpty
+        ? _questionsRef.doc(question.questionId)
+        : _questionsRef.doc();
 
-    if (photoFile != null || photoBytes != null) {
-      imageUrl = await uploadQuestionPhoto(
-        questionId: docRef.id,
-        fileName: photoFileName ?? 'question_photo.jpg',
-        photoFile: photoFile,
-        photoBytes: photoBytes,
-      );
+    String? resolvedImageUrl = question.imageUrl;
+
+    // Eğer imageUrl yerel bir dosya yoluysa önce Firebase Storage'a yükle
+    if (resolvedImageUrl != null &&
+        resolvedImageUrl.isNotEmpty &&
+        !resolvedImageUrl.startsWith('http://') &&
+        !resolvedImageUrl.startsWith('https://')) {
+      final localPhoto = File(resolvedImageUrl);
+      if (await localPhoto.exists()) {
+        resolvedImageUrl = await uploadQuestionPhoto(
+          questionId: docRef.id,
+          fileName: localPhoto.uri.pathSegments.last,
+          photoFile: localPhoto,
+        );
+      }
     }
 
-    final now = DateTime.now();
-    final payload = <String, dynamic>{
-      'id': docRef.id,
-      'title': title.trim(),
-      'content': content.trim(),
-      'authorId': authorId,
-      'authorName': authorName,
-      'authorRole': authorRole.name,
-      'courseId': courseId,
-      'courseName': courseName,
-      'tags': tags,
-      'imageUrl': imageUrl,
-      'answerCount': 0,
-      'isResolved': false,
-      'resolvedAnswerId': null,
-      'createdAt': Timestamp.fromDate(now),
-      'updatedAt': Timestamp.fromDate(now),
-    };
+    final modelToSave = question.copyWith(
+      questionId: docRef.id,
+      imageUrl: resolvedImageUrl,
+    );
 
-    await docRef.set(payload);
-    return _normalizeMap(payload);
+    await docRef.set(modelToSave.toJson());
   }
 
   @override
-  Future<Map<String, dynamic>> postForumAnswer({
-    required String questionId,
-    required String content,
-    required String authorId,
-    required String authorName,
-    required UserRole authorRole,
-  }) async {
-    final questionDocRef = _questionsRef.doc(questionId);
-    final answerDocRef = _answersRef(questionId).doc();
-    final now = DateTime.now();
-
-    final isInstructor =
-        authorRole == UserRole.instructor || authorRole == UserRole.admin;
-
-    final answerPayload = <String, dynamic>{
-      'id': answerDocRef.id,
-      'questionId': questionId,
-      'content': content.trim(),
-      'authorId': authorId,
-      'authorName': authorName,
-      'authorRole': authorRole.name,
-      'isInstructorAnswer': isInstructor,
-      'isInstructorApproved': false,
-      'isResolved': false,
-      'createdAt': Timestamp.fromDate(now),
-    };
-
-    final batch = _firestore.batch();
-    batch.set(answerDocRef, answerPayload);
-    batch.update(questionDocRef, {
-      'answerCount': FieldValue.increment(1),
-      'updatedAt': Timestamp.fromDate(now),
+  Stream<List<ForumAnswerModel>> watchForumAnswers(String questionId) {
+    return _answersRef(questionId).snapshots().map((snapshot) {
+      return snapshot.docs
+          .map((doc) => ForumAnswerModel.fromFirestore(doc.data(), doc.id))
+          .toList();
     });
-    await batch.commit();
-
-    return _normalizeMap(answerPayload);
   }
 
   @override
-  Future<void> markAnswerAsResolved({
-    required String questionId,
-    required String answerId,
-    bool isResolved = true,
-  }) async {
+  Future<void> postForumAnswer(
+    String questionId,
+    ForumAnswerModel answer,
+  ) async {
+    final docRef = answer.answerId.isNotEmpty
+        ? _answersRef(questionId).doc(answer.answerId)
+        : _answersRef(questionId).doc();
+
+    await docRef.set(answer.toJson());
+  }
+
+  @override
+  Future<void> markAnswerAsResolved(
+    String questionId,
+    String answerId,
+  ) async {
     final questionDocRef = _questionsRef.doc(questionId);
     final answerDocRef = _answersRef(questionId).doc(answerId);
-    final now = DateTime.now();
 
     // Atomik Batch Write: hem yanıtı isInstructorApproved = true hem de soruyu isResolved = true yapar
     final batch = _firestore.batch();
     batch.update(answerDocRef, {
-      'isInstructorApproved': isResolved,
-      'isResolved': isResolved,
+      'isInstructorApproved': true,
     });
     batch.update(questionDocRef, {
-      'isResolved': isResolved,
-      'resolvedAnswerId': isResolved ? answerId : null,
-      'updatedAt': Timestamp.fromDate(now),
+      'isResolved': true,
     });
     await batch.commit();
-  }
-
-  Map<String, dynamic> _normalizeMap(Map<String, dynamic> raw) {
-    final result = <String, dynamic>{};
-    raw.forEach((key, value) {
-      if (value is Timestamp) {
-        result[key] = value.toDate().toIso8601String();
-      } else {
-        result[key] = value;
-      }
-    });
-    return result;
   }
 }

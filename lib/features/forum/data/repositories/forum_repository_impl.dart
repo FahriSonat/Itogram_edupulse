@@ -1,10 +1,12 @@
-import 'dart:io';
-import 'dart:typed_data';
-import '../../../../core/enums/user_role.dart';
 import '../../../../core/network/network_info.dart';
+import '../../domain/entities/forum_answer_entity.dart';
+import '../../domain/entities/forum_question_entity.dart';
+import '../../domain/repositories/forum_repository.dart';
 import '../datasources/forum_remote_datasource.dart';
+import '../models/forum_answer_model.dart';
+import '../models/forum_question_model.dart';
 
-class ForumRepositoryImpl {
+class ForumRepositoryImpl implements ForumRepository {
   final ForumRemoteDataSource _remoteDataSource;
   final NetworkInfo _networkInfo;
 
@@ -14,89 +16,75 @@ class ForumRepositoryImpl {
   })  : _remoteDataSource = remoteDataSource ?? ForumRemoteDataSourceImpl(),
         _networkInfo = networkInfo ?? NetworkInfoImpl();
 
-  Stream<List<Map<String, dynamic>>> watchForumQuestions({
-    String? courseId,
-    bool? onlyResolved,
+  @override
+  Stream<List<ForumQuestionEntity>> watchForumQuestions({
+    String? courseTag,
+    String? topicTag,
   }) {
     return _remoteDataSource.watchForumQuestions(
-      courseId: courseId,
-      onlyResolved: onlyResolved,
+      courseTag: courseTag,
+      topicTag: topicTag,
     );
   }
 
-  Stream<List<Map<String, dynamic>>> watchQuestionAnswers(String questionId) {
-    return _remoteDataSource.watchQuestionAnswers(questionId);
-  }
-
-  /// Öğrencinin çektiği soru fotoğrafını Firebase Storage'a yükler,
-  /// soru ve etiketleri (`tags`) Firestore `forum_questions` koleksiyonuna yazar.
-  Future<Map<String, dynamic>> askQuestionWithPhoto({
-    required String title,
-    required String content,
-    required String authorId,
-    required String authorName,
-    required UserRole authorRole,
-    String? courseId,
-    String? courseName,
-    List<String> tags = const [],
-    File? photoFile,
-    Uint8List? photoBytes,
-    String? photoFileName,
-  }) async {
+  @override
+  Future<void> askQuestionWithPhoto(ForumQuestionEntity question) async {
     if (!await _networkInfo.isConnected) {
       throw Exception('İnternet bağlantısı bulunamadı.');
     }
 
-    return _remoteDataSource.askQuestionWithPhoto(
-      title: title,
-      content: content,
-      authorId: authorId,
-      authorName: authorName,
-      authorRole: authorRole,
-      courseId: courseId,
-      courseName: courseName,
-      tags: tags,
-      photoFile: photoFile,
-      photoBytes: photoBytes,
-      photoFileName: photoFileName,
-    );
+    final model = question is ForumQuestionModel
+        ? question
+        : ForumQuestionModel(
+            questionId: question.questionId,
+            authorUid: question.authorUid,
+            authorName: question.authorName,
+            courseTag: question.courseTag,
+            topicTag: question.topicTag,
+            questionText: question.questionText,
+            imageUrl: question.imageUrl,
+            isResolved: question.isResolved,
+          );
+
+    await _remoteDataSource.askQuestionWithPhoto(model);
   }
 
-  Future<Map<String, dynamic>> postForumAnswer({
-    required String questionId,
-    required String content,
-    required String authorId,
-    required String authorName,
-    required UserRole authorRole,
-  }) async {
+  @override
+  Stream<List<ForumAnswerEntity>> watchForumAnswers(String questionId) {
+    return _remoteDataSource.watchForumAnswers(questionId);
+  }
+
+  @override
+  Future<void> postForumAnswer(
+    String questionId,
+    ForumAnswerEntity answer,
+  ) async {
     if (!await _networkInfo.isConnected) {
       throw Exception('İnternet bağlantısı bulunamadı.');
     }
 
-    return _remoteDataSource.postForumAnswer(
-      questionId: questionId,
-      content: content,
-      authorId: authorId,
-      authorName: authorName,
-      authorRole: authorRole,
-    );
+    final model = answer is ForumAnswerModel
+        ? answer
+        : ForumAnswerModel(
+            answerId: answer.answerId,
+            responderName: answer.responderName,
+            responderRole: answer.responderRole,
+            answerText: answer.answerText,
+            isInstructorApproved: answer.isInstructorApproved,
+          );
+
+    await _remoteDataSource.postForumAnswer(questionId, model);
   }
 
-  /// Eğitmen bir yanıtı "Çözüldü" olarak işaretlediğinde Atomik Batch Write ile
-  /// hem yanıtı `isInstructorApproved = true` hem de soruyu `isResolved = true` olarak günceller.
-  Future<void> markAnswerAsResolved({
-    required String questionId,
-    required String answerId,
-    bool isResolved = true,
-  }) async {
+  @override
+  Future<void> markAnswerAsResolved(
+    String questionId,
+    String answerId,
+  ) async {
     if (!await _networkInfo.isConnected) {
       throw Exception('İnternet bağlantısı bulunamadı.');
     }
 
-    await _remoteDataSource.markAnswerAsResolved(
-      questionId: questionId,
-      answerId: answerId,
-      isResolved: isResolved,
-    );
+    await _remoteDataSource.markAnswerAsResolved(questionId, answerId);
   }
 }

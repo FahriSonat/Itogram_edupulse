@@ -1,7 +1,10 @@
 import '../../../../core/network/network_info.dart';
+import '../../domain/entities/course_schedule_entity.dart';
+import '../../domain/repositories/schedule_repository.dart';
 import '../datasources/schedule_remote_datasource.dart';
+import '../models/course_schedule_model.dart';
 
-class ScheduleRepositoryImpl {
+class ScheduleRepositoryImpl implements ScheduleRepository {
   final ScheduleRemoteDataSource _remoteDataSource;
   final NetworkInfo _networkInfo;
 
@@ -11,86 +14,60 @@ class ScheduleRepositoryImpl {
   })  : _remoteDataSource = remoteDataSource ?? ScheduleRemoteDataSourceImpl(),
         _networkInfo = networkInfo ?? NetworkInfoImpl();
 
-  Stream<List<Map<String, dynamic>>> watchWeeklySchedule({
-    int? dayOfWeek,
-    String? instructorId,
-    String? studentId,
-  }) {
-    return _remoteDataSource.watchWeeklySchedule(
-      dayOfWeek: dayOfWeek,
-      instructorId: instructorId,
-      studentId: studentId,
-    );
+  @override
+  Stream<List<CourseScheduleEntity>> watchWeeklySchedule() {
+    return _remoteDataSource.watchWeeklySchedule();
   }
 
-  Future<Map<String, dynamic>> addCourse({
-    required String courseCode,
-    required String courseName,
-    required String instructorId,
-    required String instructorName,
-    required int dayOfWeek,
-    required String startTime,
-    required String endTime,
-    required String classroom,
-    int credit = 3,
-    List<String> enrolledStudentIds = const [],
-  }) async {
+  @override
+  Future<void> addCourse(CourseScheduleEntity course) async {
     if (!await _networkInfo.isConnected) {
       throw Exception('İnternet bağlantısı bulunamadı.');
     }
 
-    return _remoteDataSource.addCourseSchedule(
-      courseCode: courseCode,
-      courseName: courseName,
-      instructorId: instructorId,
-      instructorName: instructorName,
-      dayOfWeek: dayOfWeek,
-      startTime: startTime,
-      endTime: endTime,
-      classroom: classroom,
-      credit: credit,
-      enrolledStudentIds: enrolledStudentIds,
-    );
+    final model = course is CourseScheduleModel
+        ? course
+        : CourseScheduleModel(
+            courseId: course.courseId,
+            courseCode: course.courseCode,
+            courseName: course.courseName,
+            instructorName: course.instructorName,
+            roomLocation: course.roomLocation,
+            dayOfWeek: course.dayOfWeek,
+            startTime: course.startTime,
+            endTime: course.endTime,
+          );
+
+    await _remoteDataSource.addCourse(model);
   }
 
-  /// Eğitmen ders saatini (`startTime`, `endTime`), amfi konumunu (`classroom`, örn: `D-107`)
-  /// veya hoca adını (`instructorName`) güncellediğinde Firestore `courses` dökümanını günceller.
-  Future<Map<String, dynamic>> updateCourseDetails({
-    required String courseId,
-    String? courseCode,
-    String? courseName,
-    String? instructorId,
-    String? instructorName,
-    int? dayOfWeek,
-    String? startTime,
-    String? endTime,
-    String? classroom,
-    int? credit,
-    List<String>? enrolledStudentIds,
-  }) async {
+  @override
+  Future<void> updateCourse(CourseScheduleEntity course) async {
     if (!await _networkInfo.isConnected) {
       throw Exception('İnternet bağlantısı bulunamadı.');
     }
 
-    return _remoteDataSource.updateCourseDetails(
-      courseId: courseId,
-      courseCode: courseCode,
-      courseName: courseName,
-      instructorId: instructorId,
-      instructorName: instructorName,
-      dayOfWeek: dayOfWeek,
-      startTime: startTime,
-      endTime: endTime,
-      classroom: classroom,
-      credit: credit,
-      enrolledStudentIds: enrolledStudentIds,
-    );
+    final model = course is CourseScheduleModel
+        ? course
+        : CourseScheduleModel(
+            courseId: course.courseId,
+            courseCode: course.courseCode,
+            courseName: course.courseName,
+            instructorName: course.instructorName,
+            roomLocation: course.roomLocation,
+            dayOfWeek: course.dayOfWeek,
+            startTime: course.startTime,
+            endTime: course.endTime,
+          );
+
+    await _remoteDataSource.updateCourse(model);
   }
 
+  @override
   Future<void> removeCourse(String courseId) async {
     if (!await _networkInfo.isConnected) {
       throw Exception('İnternet bağlantısı bulunamadı.');
     }
-    await _remoteDataSource.removeCourseSchedule(courseId);
+    await _remoteDataSource.removeCourse(courseId);
   }
 }
