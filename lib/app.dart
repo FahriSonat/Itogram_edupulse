@@ -1,9 +1,9 @@
-import 'package:edupulse/core/config/flavor_config.dart';
-import 'package:edupulse/core/di/injection_container.dart';
-import 'package:edupulse/core/router/app_router.dart';
-import 'package:edupulse/core/theme/app_theme.dart';
-import 'package:edupulse/core/theme/theme_cubit.dart';
-import 'package:edupulse/features/auth/presentation/cubit/auth_cubit.dart';
+import 'package:itogram_edupulse/core/config/flavor_config.dart';
+import 'package:itogram_edupulse/core/di/injection_container.dart';
+import 'package:itogram_edupulse/core/router/app_router.dart';
+import 'package:itogram_edupulse/core/theme/app_theme.dart';
+import 'package:itogram_edupulse/core/theme/theme_cubit.dart';
+import 'package:itogram_edupulse/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
