@@ -4,6 +4,8 @@ import '../../../../core/enums/user_role.dart';
 import '../../../../core/network/network_info.dart';
 import '../../../../core/services/analytics_service.dart';
 import '../../../../core/services/fcm_notification_service.dart';
+import '../../domain/entities/user_entity.dart';
+import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_local_datasource.dart';
 import '../datasources/auth_remote_datasource.dart';
 
@@ -23,7 +25,7 @@ class AuthFailure extends Equatable implements Exception {
 
 /// AuthRemoteDataSource ve AuthLocalDataSource'u birleştirir;
 /// Firebase hatalarını Türkçe ve anlaşılır AuthFailure nesnelerine dönüştürür.
-class AuthRepositoryImpl {
+class AuthRepositoryImpl implements AuthRepository {
   final AuthRemoteDataSource _remoteDataSource;
   final AuthLocalDataSource _localDataSource;
   final NetworkInfo _networkInfo;
@@ -40,10 +42,11 @@ class AuthRepositoryImpl {
         _localDataSource = localDataSource ?? AuthLocalDataSourceImpl(),
         _networkInfo = networkInfo ?? NetworkInfoImpl();
 
-  Future<Map<String, dynamic>> loginWithStudentNo({
-    required String identifier,
-    required String password,
-  }) async {
+  @override
+  Future<UserEntity> loginWithStudentNo(
+    String studentNo,
+    String password,
+  ) async {
     if (!await _networkInfo.isConnected) {
       throw const AuthFailure(
         'İnternet bağlantısı bulunamadı. Lütfen bağlantınızı kontrol edin.',
@@ -53,16 +56,16 @@ class AuthRepositoryImpl {
 
     try {
       final token = await fcmService?.getFcmToken();
-      final userMap = await _remoteDataSource.loginWithStudentNoOrEmail(
-        identifier: identifier,
-        password: password,
+      final userModel = await _remoteDataSource.loginWithStudentNo(
+        studentNo,
+        password,
         fcmToken: token,
       );
 
-      await _localDataSource.cacheUser(userMap);
-      await _syncAnalytics(userMap);
+      await _localDataSource.cacheUser(userModel);
+      await _syncAnalytics(userModel);
 
-      return userMap;
+      return userModel;
     } on FirebaseAuthException catch (e) {
       throw mapFirebaseAuthException(e);
     } catch (e) {
@@ -71,13 +74,13 @@ class AuthRepositoryImpl {
     }
   }
 
-  Future<Map<String, dynamic>> registerUser({
+  @override
+  Future<UserEntity> registerUser({
+    required String studentNo,
+    required String fullName,
     required String email,
     required String password,
-    required String fullName,
     required UserRole role,
-    String? studentNo,
-    String? department,
   }) async {
     if (!await _networkInfo.isConnected) {
       throw const AuthFailure(
@@ -88,20 +91,19 @@ class AuthRepositoryImpl {
 
     try {
       final token = await fcmService?.getFcmToken();
-      final userMap = await _remoteDataSource.registerUser(
+      final userModel = await _remoteDataSource.registerUser(
+        studentNo: studentNo,
+        fullName: fullName,
         email: email,
         password: password,
-        fullName: fullName,
         role: role,
-        studentNo: studentNo,
-        department: department,
         fcmToken: token,
       );
 
-      await _localDataSource.cacheUser(userMap);
-      await _syncAnalytics(userMap);
+      await _localDataSource.cacheUser(userModel);
+      await _syncAnalytics(userModel);
 
-      return userMap;
+      return userModel;
     } on FirebaseAuthException catch (e) {
       throw mapFirebaseAuthException(e);
     } catch (e) {
@@ -110,7 +112,8 @@ class AuthRepositoryImpl {
     }
   }
 
-  Future<void> sendPasswordResetMail({required String identifier}) async {
+  @override
+  Future<void> sendPasswordResetEmail(String email) async {
     if (!await _networkInfo.isConnected) {
       throw const AuthFailure(
         'İnternet bağlantısı bulunamadı. Lütfen bağlantınızı kontrol edin.',
@@ -119,7 +122,7 @@ class AuthRepositoryImpl {
     }
 
     try {
-      await _remoteDataSource.sendPasswordResetEmail(identifier: identifier);
+      await _remoteDataSource.sendPasswordResetEmail(email);
     } on FirebaseAuthException catch (e) {
       throw mapFirebaseAuthException(e);
     } catch (e) {
@@ -128,8 +131,9 @@ class AuthRepositoryImpl {
     }
   }
 
-  Future<Map<String, dynamic>?> getCurrentUser() async {
-    return _networkInfo.executeWithOfflineFallback<Map<String, dynamic>?>(
+  @override
+  Future<UserEntity?> getCurrentUser() async {
+    return _networkInfo.executeWithOfflineFallback<UserEntity?>(
       onOnline: () async {
         final remoteUser = await _remoteDataSource.getCurrentUser();
         if (remoteUser != null) {
@@ -142,24 +146,21 @@ class AuthRepositoryImpl {
     );
   }
 
-  Stream<Map<String, dynamic>?> watchAuthStateChanges() {
+  Stream<UserEntity?> watchAuthStateChanges() {
     return _remoteDataSource.watchAuthStateChanges();
   }
 
+  @override
   Future<void> logout() async {
     await _remoteDataSource.logout();
     await _localDataSource.clearAuthCache();
     await analyticsService?.clearUserIdentity();
   }
 
-  Future<void> _syncAnalytics(Map<String, dynamic> userMap) async {
-    final userId = (userMap['id'] ?? userMap['uid'])?.toString();
-    if (userId == null) return;
-
+  Future<void> _syncAnalytics(UserEntity user) async {
     await analyticsService?.setUserIdentity(
-      userId: userId,
-      role: userMap['role']?.toString(),
-      department: userMap['department']?.toString(),
+      userId: user.uid,
+      role: user.role.name,
     );
     await analyticsService?.logLogin();
   }
@@ -214,7 +215,8 @@ class AuthRepositoryImpl {
         );
       default:
         return AuthFailure(
-          e.message ?? 'Kimlik doğrulama işlemi sırasında bir hata oluştu (${e.code}).',
+          e.message ??
+              'Kimlik doğrulama işlemi sırasında bir hata oluştu (${e.code}).',
           code: e.code,
         );
     }

@@ -2,6 +2,9 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/constants/firestore_paths.dart';
 import '../../../../core/enums/attendance_status.dart';
+import '../../../../core/enums/user_role.dart';
+import '../models/attendance_session_model.dart';
+import '../models/student_absence_record_model.dart';
 
 /// Kritik İş Kuralı 1: 60 saniyelik QR/PIN yoklama oturumu süresi dolduğunda
 /// veya oturum kapalı olduğunda fırlatılan özel istisna.
@@ -9,69 +12,52 @@ class ExpiredQrPinException implements Exception {
   final String message;
 
   const ExpiredQrPinException([
-    this.message = 'Yoklama kodunun 60 saniyelik süresi dolmuş veya oturum kapatılmış.',
+    this.message =
+        'Yoklama kodunun 60 saniyelik süresi dolmuş veya oturum kapatılmış.',
   ]);
 
   @override
   String toString() => message;
 }
 
-/// Kritik İş Kuralı 1 & 3 Uygulayıcısı:
-/// 1) Öğrenci PIN veya QR okuttuğunda Firestore Transaction içinde sunucu zamanını
-///    kontrol eder; `now > expiresAt` (60 sn dolmuşsa) veya oturum kapalıysa
-///    [ExpiredQrPinException] fırlatır.
-/// 2) Eğitmen yoklamayı kapattığında veya manuel devamsızlık eklediğinde öğrencinin
-///    toplam devamsızlık yüzdesini hesaplar; %20'yi aşıyorsa `isCriticalRisk = true` yapar.
 abstract class AttendanceRemoteDataSource {
-  Future<Map<String, dynamic>> createOrRefresh60sQrPinSession({
-    required String courseId,
-    required String instructorId,
-    String? sessionId,
-    int validitySeconds = 60,
-  });
+  Future<AttendanceSessionModel> generateAttendanceSession(String courseId);
 
-  Future<Map<String, dynamic>> submitLiveAttendance({
-    required String courseId,
+  Future<void> submitLiveAttendance({
     required String sessionId,
-    required String studentId,
-    required String studentName,
-    required String studentNo,
-    String? pinOrQrToken,
+    required String studentUid,
+    required String code,
   });
 
-  /// Eğitmen yoklama oturumunu kapattığında katılmayan öğrencilerin devamsızlığını
-  /// günceller ve %20 sınırını aşan kritik riskli öğrencilerin listesini döner.
-  Future<List<Map<String, dynamic>>> closeAttendanceSession({
-    required String courseId,
-    required String sessionId,
-    int sessionHours = 1,
-    int totalCourseHours = 14,
-  });
+  Stream<AttendanceSessionModel?> watchLiveAttendanceRoster(String sessionId);
 
-  Stream<Map<String, dynamic>?> watchLiveAttendanceSession({
+  Future<StudentAbsenceRecordModel> updateAttendanceRecord({
     required String courseId,
-    required String sessionId,
-  });
-
-  Stream<List<Map<String, dynamic>>> watchCourseAttendanceRecords({
-    required String courseId,
-  });
-
-  Future<Map<String, dynamic>> updateStudentAttendanceRecord({
-    required String courseId,
-    required String studentId,
-    required String studentName,
-    required String studentNo,
+    required String studentUid,
     required AttendanceStatus status,
-    required int totalSessions,
-    required int absentHours,
-    required int maxAllowedAbsentHours,
   });
+
+  Future<StudentAbsenceRecordModel> evaluateAbsenceRisk(
+    String courseId,
+    String studentUid,
+  );
+
+  Stream<List<StudentAbsenceRecordModel>> watchClassAbsenceRecords(
+    String courseId,
+  );
+
+  Future<StudentAbsenceRecordModel> getStudentAbsenceRecord(
+    String courseId,
+    String studentUid,
+  );
 }
 
 class AttendanceRemoteDataSourceImpl implements AttendanceRemoteDataSource {
+  static const int defaultTotalCourseHours = 14;
+
   final FirebaseFirestore _firestore;
   final Random _random = Random.secure();
+  final Map<String, String> _sessionCourseCache = <String, String>{};
 
   AttendanceRemoteDataSourceImpl({FirebaseFirestore? firestore})
       : _firestore = firestore ?? FirebaseFirestore.instance;
@@ -82,271 +68,429 @@ class AttendanceRemoteDataSourceImpl implements AttendanceRemoteDataSource {
   CollectionReference<Map<String, dynamic>> _recordsRef(String courseId) =>
       _firestore.collection(FirestorePaths.attendanceRecords(courseId));
 
-  String _generate6DigitPin() {
-    final number = 100000 + _random.nextInt(900000);
+  CollectionReference<Map<String, dynamic>> get _usersRef =>
+      _firestore.collection(FirestorePaths.users);
+
+  CollectionReference<Map<String, dynamic>> get _coursesRef =>
+      _firestore.collection(FirestorePaths.courses);
+
+  /// Şartnameye uygun 4 haneli PIN (1000 - 9999) üretir.
+  String _generate4DigitPin() {
+    final number = 1000 + _random.nextInt(9000);
     return number.toString();
   }
 
-  @override
-  Future<Map<String, dynamic>> createOrRefresh60sQrPinSession({
-    required String courseId,
-    required String instructorId,
-    String? sessionId,
-    int validitySeconds = 60,
-  }) async {
-    final sessionsCol = _sessionsRef(courseId);
-    final docRef =
-        sessionId != null ? sessionsCol.doc(sessionId) : sessionsCol.doc();
+  /// Hiç yoklama vermemiş öğrenciler için de `attendance_records` başlangıç
+  /// dökümanlarının (`StudentAbsenceRecordModel` şemasında) var olduğundan emin olur.
+  Future<Map<String, AttendanceStatus>> _initializeCourseAttendanceRecords(
+    String courseId,
+  ) async {
+    final initialStatusMap = <String, AttendanceStatus>{};
 
-    final now = DateTime.now();
-    final expiresAt = now.add(Duration(seconds: validitySeconds));
-    final pinCode = _generate6DigitPin();
-    final qrPayload =
-        'EDUPULSE|$courseId|${docRef.id}|$pinCode|${expiresAt.millisecondsSinceEpoch}';
+    try {
+      final courseDoc = await _coursesRef.doc(courseId).get();
+      final courseName =
+          (courseDoc.data()?['courseName'] ?? courseId).toString();
 
-    final payload = <String, dynamic>{
-      'id': docRef.id,
-      'courseId': courseId,
-      'instructorId': instructorId,
-      'pinCode': pinCode,
-      'qrData': qrPayload,
-      'isActive': true,
-      'createdAt': Timestamp.fromDate(now),
-      'expiresAt': Timestamp.fromDate(expiresAt),
-    };
+      final existingRecordsSnap = await _recordsRef(courseId).get();
+      final existingIds =
+          existingRecordsSnap.docs.map((doc) => doc.id).toSet();
 
-    if (sessionId == null) {
-      payload['presentStudentIds'] = <String>[];
-      payload['attendees'] = <Map<String, dynamic>>[];
-      await docRef.set(payload);
-    } else {
-      await docRef.set(payload, SetOptions(merge: true));
+      final studentsSnap = await _usersRef
+          .where('role', isEqualTo: UserRole.student.name)
+          .get();
+
+      final batch = _firestore.batch();
+      var hasNewRecord = false;
+
+      for (final studentDoc in studentsSnap.docs) {
+        final studentUid = studentDoc.id;
+        initialStatusMap[studentUid] = AttendanceStatus.absent;
+
+        if (!existingIds.contains(studentUid)) {
+          final sData = studentDoc.data();
+          final studentName = (sData['fullName'] ?? '').toString();
+          final studentNo =
+              (sData['studentOrStaffNo'] ?? sData['studentNo'] ?? '').toString();
+
+          final recordModel = StudentAbsenceRecordModel(
+            studentUid: studentUid,
+            studentName: studentName,
+            studentNo: studentNo,
+            courseId: courseId,
+            courseName: courseName,
+            totalCourseHours: defaultTotalCourseHours,
+            absentHours: 0,
+            absencePercentage: 0.0,
+            isCriticalRisk: false,
+          );
+
+          batch.set(
+            _recordsRef(courseId).doc(studentUid),
+            recordModel.toJson(),
+          );
+          hasNewRecord = true;
+        }
+      }
+
+      if (hasNewRecord) {
+        await batch.commit();
+      }
+    } catch (_) {
+      // Öğrenci rolüyle çağrıldığında yazma izni yoksa sessizce geç
     }
 
-    return _normalizeMap(payload);
+    return initialStatusMap;
+  }
+
+  /// `sessionId` veya `code` üzerinden ilgili oturumun Firestore döküman referansını
+  /// ve `courseId` bilgisini çözümler.
+  Future<DocumentReference<Map<String, dynamic>>> _resolveSessionDocRef({
+    required String sessionId,
+    String? code,
+  }) async {
+    // 1) QR token içinden courseId ve sessionId ayrıştırma: EDUPULSE|courseId|sessionId|pinCode
+    if (code != null && code.startsWith('EDUPULSE|')) {
+      final parts = code.split('|');
+      if (parts.length >= 3) {
+        final parsedCourseId = parts[1];
+        final parsedSessionId = parts[2];
+        _sessionCourseCache[parsedSessionId] = parsedCourseId;
+        return _sessionsRef(parsedCourseId).doc(parsedSessionId);
+      }
+    }
+
+    // 2) sessionId "courseId/sessionId" formatındaysa
+    if (sessionId.contains('/')) {
+      final parts = sessionId.split('/');
+      if (parts.length >= 2) {
+        _sessionCourseCache[parts.last] = parts.first;
+        return _sessionsRef(parts.first).doc(parts.last);
+      }
+    }
+
+    // 3) Önbellekte courseId varsa
+    final cachedCourseId = _sessionCourseCache[sessionId];
+    if (cachedCourseId != null && cachedCourseId.isNotEmpty) {
+      return _sessionsRef(cachedCourseId).doc(sessionId);
+    }
+
+    // 4) Courses koleksiyonundaki alt koleksiyonlardan bul
+    final coursesSnap = await _coursesRef.get();
+    for (final courseDoc in coursesSnap.docs) {
+      final cId = courseDoc.id;
+      if (sessionId.isNotEmpty) {
+        final candidateRef = _sessionsRef(cId).doc(sessionId);
+        final candidateSnap = await candidateRef.get();
+        if (candidateSnap.exists) {
+          _sessionCourseCache[sessionId] = cId;
+          return candidateRef;
+        }
+      }
+
+      if (code != null && code.trim().isNotEmpty) {
+        final byPinSnap = await _sessionsRef(cId)
+            .where('pinCode', isEqualTo: code.trim())
+            .where('isActive', isEqualTo: true)
+            .limit(1)
+            .get();
+        if (byPinSnap.docs.isNotEmpty) {
+          final foundDoc = byPinSnap.docs.first;
+          _sessionCourseCache[foundDoc.id] = cId;
+          return foundDoc.reference;
+        }
+      }
+    }
+
+    // 5) Eğer sessionId doğrudan courseId olarak verilmişse o dersteki aktif oturumu bul
+    if (sessionId.isNotEmpty) {
+      final activeInCourse = await _sessionsRef(sessionId)
+          .where('isActive', isEqualTo: true)
+          .limit(1)
+          .get();
+      if (activeInCourse.docs.isNotEmpty) {
+        final foundDoc = activeInCourse.docs.first;
+        _sessionCourseCache[foundDoc.id] = sessionId;
+        return foundDoc.reference;
+      }
+    }
+
+    throw const ExpiredQrPinException('Aktif yoklama oturumu bulunamadı.');
   }
 
   @override
-  Future<Map<String, dynamic>> submitLiveAttendance({
-    required String courseId,
-    required String sessionId,
-    required String studentId,
-    required String studentName,
-    required String studentNo,
-    String? pinOrQrToken,
-  }) async {
-    final sessionDocRef = _sessionsRef(courseId).doc(sessionId);
-    final recordDocRef = _recordsRef(courseId).doc(studentId);
+  Future<AttendanceSessionModel> generateAttendanceSession(
+    String courseId,
+  ) async {
+    final initialStatusMap = await _initializeCourseAttendanceRecords(courseId);
+    final docRef = _sessionsRef(courseId).doc();
+    final now = DateTime.now();
+    final expiresAt = now.add(const Duration(seconds: 60));
+    final pinCode = _generate4DigitPin();
+    final qrCodeToken =
+        'EDUPULSE|$courseId|${docRef.id}|$pinCode|${expiresAt.millisecondsSinceEpoch}';
 
-    return _firestore.runTransaction((transaction) async {
+    final sessionModel = AttendanceSessionModel(
+      sessionId: docRef.id,
+      courseId: courseId,
+      qrCodeToken: qrCodeToken,
+      pinCode: pinCode,
+      createdAt: now,
+      expiresAt: expiresAt,
+      isActive: true,
+      studentStatusMap: initialStatusMap,
+    );
+
+    _sessionCourseCache[docRef.id] = courseId;
+    await docRef.set(sessionModel.toJson());
+    return sessionModel;
+  }
+
+  @override
+  Future<void> submitLiveAttendance({
+    required String sessionId,
+    required String studentUid,
+    required String code,
+  }) async {
+    final sessionDocRef = await _resolveSessionDocRef(
+      sessionId: sessionId,
+      code: code,
+    );
+    final courseId =
+        sessionDocRef.parent.parent?.id ?? _sessionCourseCache[sessionId] ?? '';
+    final recordDocRef = _recordsRef(courseId).doc(studentUid);
+    final userDocRef = _usersRef.doc(studentUid);
+    final courseDocRef = _coursesRef.doc(courseId);
+
+    await _firestore.runTransaction((transaction) async {
+      // =======================================================================
+      // 1) ÖNCE TÜM OKUMALAR (Firestore Transaction Kuralı: Reads before Writes)
+      // =======================================================================
       final sessionSnap = await transaction.get(sessionDocRef);
+      final recordSnap = await transaction.get(recordDocRef);
+      final userSnap = await transaction.get(userDocRef);
+      final courseSnap = await transaction.get(courseDocRef);
+
       if (!sessionSnap.exists || sessionSnap.data() == null) {
         throw const ExpiredQrPinException('Yoklama oturumu bulunamadı.');
       }
 
       final sessionData = sessionSnap.data()!;
       final isActive = sessionData['isActive'] as bool? ?? false;
-      final expiresAtRaw = sessionData['expiresAt'];
-      final expiresAt = expiresAtRaw is Timestamp
-          ? expiresAtRaw.toDate()
-          : DateTime.tryParse(expiresAtRaw?.toString() ?? '');
-
+      final expiresAt = (sessionData['expiresAt'] as Timestamp).toDate();
       final now = DateTime.now();
 
-      // Kritik İş Kuralı 1: now > expiresAt (60 sn dolmuşsa) veya oturum kapalıysa ExpiredQrPinException fırlat
-      if (!isActive || (expiresAt != null && now.isAfter(expiresAt))) {
+      // Kritik İş Kuralı 1: now > expiresAt (60 sn dolmuşsa) veya oturum kapalıysa ExpiredQrPinException
+      if (!isActive || now.isAfter(expiresAt)) {
         throw const ExpiredQrPinException(
           'Yoklama kodunun 60 saniyelik süresi doldu veya oturum kapatıldı.',
         );
       }
 
-      if (pinOrQrToken != null && pinOrQrToken.trim().isNotEmpty) {
-        final expectedPin = sessionData['pinCode']?.toString();
-        final expectedQr = sessionData['qrData']?.toString();
-        final trimmedInput = pinOrQrToken.trim();
-        if (trimmedInput != expectedPin && trimmedInput != expectedQr) {
-          throw Exception('Geçersiz PIN veya QR kodu.');
-        }
+      final expectedPin = (sessionData['pinCode'] ?? '').toString().trim();
+      final expectedQr = (sessionData['qrCodeToken'] ?? '').toString().trim();
+      final trimmedCode = code.trim();
+
+      if (trimmedCode.isNotEmpty &&
+          trimmedCode != expectedPin &&
+          trimmedCode != expectedQr) {
+        throw Exception('Geçersiz PIN veya QR kodu.');
       }
 
-      final attendeeEntry = <String, dynamic>{
-        'studentId': studentId,
-        'studentName': studentName,
-        'studentNo': studentNo,
-        'status': AttendanceStatus.present.name,
-        'timestamp': now.toIso8601String(),
-      };
+      // =======================================================================
+      // 2) SONRA TÜM YAZMALAR
+      // =======================================================================
+      final currentStatusMap = Map<String, dynamic>.from(
+        sessionData['studentStatusMap'] as Map<String, dynamic>? ?? {},
+      );
+      currentStatusMap[studentUid] = AttendanceStatus.present.name;
 
       transaction.update(sessionDocRef, {
-        'presentStudentIds': FieldValue.arrayUnion([studentId]),
-        'attendees': FieldValue.arrayUnion([attendeeEntry]),
+        'studentStatusMap': currentStatusMap,
       });
 
-      final recordSnap = await transaction.get(recordDocRef);
-      if (recordSnap.exists && recordSnap.data() != null) {
-        final currentAttended =
-            (recordSnap.data()!['attendedSessions'] as int?) ?? 0;
-        transaction.update(recordDocRef, {
-          'attendedSessions': currentAttended + 1,
-          'lastStatus': AttendanceStatus.present.name,
-          'updatedAt': Timestamp.fromDate(now),
-        });
-      } else {
-        transaction.set(recordDocRef, {
-          'id': studentId,
-          'courseId': courseId,
-          'studentId': studentId,
-          'studentName': studentName,
-          'studentNo': studentNo,
-          'attendedSessions': 1,
-          'absentHours': 0,
-          'maxAllowedAbsentHours': 14,
-          'absencePercentage': 0.0,
-          'isCriticalRisk': false,
-          'lastStatus': AttendanceStatus.present.name,
-          'updatedAt': Timestamp.fromDate(now),
-        });
+      if (!recordSnap.exists || recordSnap.data() == null) {
+        final userData = userSnap.data() ?? const <String, dynamic>{};
+        final courseData = courseSnap.data() ?? const <String, dynamic>{};
+        final newRecord = StudentAbsenceRecordModel(
+          studentUid: studentUid,
+          studentName: (userData['fullName'] ?? '').toString(),
+          studentNo:
+              (userData['studentOrStaffNo'] ?? userData['studentNo'] ?? '')
+                  .toString(),
+          courseId: courseId,
+          courseName: (courseData['courseName'] ?? courseId).toString(),
+          totalCourseHours: defaultTotalCourseHours,
+          absentHours: 0,
+          absencePercentage: 0.0,
+          isCriticalRisk: false,
+        );
+        transaction.set(recordDocRef, newRecord.toJson());
       }
-
-      return attendeeEntry;
     });
   }
 
   @override
-  Future<List<Map<String, dynamic>>> closeAttendanceSession({
+  Stream<AttendanceSessionModel?> watchLiveAttendanceRoster(
+    String sessionId,
+  ) async* {
+    final sessionDocRef = await _resolveSessionDocRef(sessionId: sessionId);
+    yield* sessionDocRef.snapshots().map((doc) {
+      if (!doc.exists || doc.data() == null) return null;
+      return AttendanceSessionModel.fromFirestore(doc.data()!, doc.id);
+    });
+  }
+
+  @override
+  Future<StudentAbsenceRecordModel> updateAttendanceRecord({
     required String courseId,
-    required String sessionId,
-    int sessionHours = 1,
-    int totalCourseHours = 14,
+    required String studentUid,
+    required AttendanceStatus status,
   }) async {
-    final sessionDocRef = _sessionsRef(courseId).doc(sessionId);
-    final sessionSnap = await sessionDocRef.get();
-    final presentIds = List<String>.from(
-      sessionSnap.data()?['presentStudentIds'] as List? ?? const [],
-    );
+    final recordDocRef = _recordsRef(courseId).doc(studentUid);
+    final recordSnap = await recordDocRef.get();
 
-    await sessionDocRef.set(
-      {
-        'isActive': false,
-        'closedAt': Timestamp.fromDate(DateTime.now()),
-      },
-      SetOptions(merge: true),
-    );
+    int totalCourseHours = defaultTotalCourseHours;
+    int absentHours = 0;
+    String studentName = '';
+    String studentNo = '';
+    String courseName = courseId;
 
-    final recordsSnap = await _recordsRef(courseId).get();
-    final batch = _firestore.batch();
-    final criticalStudents = <Map<String, dynamic>>[];
+    if (recordSnap.exists && recordSnap.data() != null) {
+      final existing = StudentAbsenceRecordModel.fromFirestore(
+        recordSnap.data()!,
+        recordSnap.id,
+      );
+      totalCourseHours = existing.totalCourseHours > 0
+          ? existing.totalCourseHours
+          : defaultTotalCourseHours;
+      absentHours = existing.absentHours;
+      studentName = existing.studentName;
+      studentNo = existing.studentNo;
+      courseName = existing.courseName;
+    } else {
+      final userSnap = await _usersRef.doc(studentUid).get();
+      final courseSnap = await _coursesRef.doc(courseId).get();
+      final userData = userSnap.data() ?? const <String, dynamic>{};
+      final courseData = courseSnap.data() ?? const <String, dynamic>{};
+      studentName = (userData['fullName'] ?? '').toString();
+      studentNo = (userData['studentOrStaffNo'] ?? userData['studentNo'] ?? '')
+          .toString();
+      courseName = (courseData['courseName'] ?? courseId).toString();
+    }
 
-    for (final doc in recordsSnap.docs) {
-      final data = doc.data();
-      final studentId = (data['studentId'] ?? doc.id).toString();
-      if (!presentIds.contains(studentId)) {
-        final currentAbsent = (data['absentHours'] as int?) ?? 0;
-        final newAbsent = currentAbsent + sessionHours;
-        final totalHours = (data['totalSessions'] as int?) ?? totalCourseHours;
-        final effectiveTotal = totalHours > 0 ? totalHours : 14;
-        final absencePercentage = newAbsent / effectiveTotal;
-        final isCriticalRisk = absencePercentage > 0.20;
-
-        final updatedData = <String, dynamic>{
-          ...data,
-          'id': doc.id,
-          'absentHours': newAbsent,
-          'absencePercentage': absencePercentage,
-          'isCriticalRisk': isCriticalRisk,
-          'lastStatus': AttendanceStatus.absent.name,
-          'updatedAt': Timestamp.fromDate(DateTime.now()),
-        };
-
-        batch.set(doc.reference, updatedData, SetOptions(merge: true));
-        if (isCriticalRisk) {
-          criticalStudents.add(_normalizeMap(updatedData));
-        }
+    if (status == AttendanceStatus.absent) {
+      absentHours += 1;
+    } else if (status == AttendanceStatus.present ||
+        status == AttendanceStatus.excused) {
+      if (absentHours > 0) {
+        absentHours -= 1;
       }
     }
 
-    await batch.commit();
-    return criticalStudents;
-  }
-
-  @override
-  Stream<Map<String, dynamic>?> watchLiveAttendanceSession({
-    required String courseId,
-    required String sessionId,
-  }) {
-    return _sessionsRef(courseId).doc(sessionId).snapshots().map((doc) {
-      if (!doc.exists || doc.data() == null) return null;
-      final data = Map<String, dynamic>.from(doc.data()!);
-      data['id'] = doc.id;
-      return _normalizeMap(data);
-    });
-  }
-
-  @override
-  Stream<List<Map<String, dynamic>>> watchCourseAttendanceRecords({
-    required String courseId,
-  }) {
-    return _recordsRef(courseId).snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = Map<String, dynamic>.from(doc.data());
-        data['id'] = doc.id;
-        return _normalizeMap(data);
-      }).toList();
-    });
-  }
-
-  @override
-  Future<Map<String, dynamic>> updateStudentAttendanceRecord({
-    required String courseId,
-    required String studentId,
-    required String studentName,
-    required String studentNo,
-    required AttendanceStatus status,
-    required int totalSessions,
-    required int absentHours,
-    required int maxAllowedAbsentHours,
-  }) async {
-    final effectiveTotal =
-        totalSessions > 0 ? totalSessions : (maxAllowedAbsentHours * 5);
+    final ratio =
+        totalCourseHours > 0 ? (absentHours / totalCourseHours) : 0.0;
     final absencePercentage =
-        effectiveTotal > 0 ? (absentHours / effectiveTotal) : 0.0;
+        double.parse((ratio * 100.0).toStringAsFixed(2));
+    final isCriticalRisk = ratio > 0.20;
 
-    // Kritik İş Kuralı 3: Devamsızlık yüzdesi %20'yi aşıyorsa isCriticalRisk = true
-    final isCriticalRisk = absencePercentage > 0.20 ||
-        (maxAllowedAbsentHours > 0 && absentHours > maxAllowedAbsentHours);
+    final updatedModel = StudentAbsenceRecordModel(
+      studentUid: studentUid,
+      studentName: studentName,
+      studentNo: studentNo,
+      courseId: courseId,
+      courseName: courseName,
+      totalCourseHours: totalCourseHours,
+      absentHours: absentHours,
+      absencePercentage: absencePercentage,
+      isCriticalRisk: isCriticalRisk,
+    );
 
-    final payload = <String, dynamic>{
-      'id': studentId,
-      'courseId': courseId,
-      'studentId': studentId,
-      'studentName': studentName,
-      'studentNo': studentNo,
-      'lastStatus': status.name,
-      'totalSessions': totalSessions,
-      'absentHours': absentHours,
-      'maxAllowedAbsentHours': maxAllowedAbsentHours,
-      'absencePercentage': absencePercentage,
-      'isCriticalRisk': isCriticalRisk,
-      'updatedAt': Timestamp.fromDate(DateTime.now()),
-    };
-
-    await _recordsRef(courseId).doc(studentId).set(
-          payload,
-          SetOptions(merge: true),
-        );
-
-    return _normalizeMap(payload);
+    await recordDocRef.set(updatedModel.toJson());
+    return updatedModel;
   }
 
-  Map<String, dynamic> _normalizeMap(Map<String, dynamic> raw) {
-    final result = <String, dynamic>{};
-    raw.forEach((key, value) {
-      if (value is Timestamp) {
-        result[key] = value.toDate().toIso8601String();
-      } else {
-        result[key] = value;
-      }
+  @override
+  Future<StudentAbsenceRecordModel> evaluateAbsenceRisk(
+    String courseId,
+    String studentUid,
+  ) async {
+    final record = await getStudentAbsenceRecord(courseId, studentUid);
+    final total = record.totalCourseHours > 0
+        ? record.totalCourseHours
+        : defaultTotalCourseHours;
+    final ratio = record.absentHours / total;
+    final percentage = double.parse((ratio * 100.0).toStringAsFixed(2));
+    final isCritical = ratio > 0.20;
+
+    if (record.isCriticalRisk != isCritical ||
+        record.absencePercentage != percentage) {
+      final updated = record.copyWith(
+        absencePercentage: percentage,
+        isCriticalRisk: isCritical,
+      );
+      await _recordsRef(courseId).doc(studentUid).set(updated.toJson());
+      return updated;
+    }
+    return record;
+  }
+
+  @override
+  Stream<List<StudentAbsenceRecordModel>> watchClassAbsenceRecords(
+    String courseId,
+  ) {
+    return _recordsRef(courseId).snapshots().map((snapshot) {
+      return snapshot.docs
+          .map(
+            (doc) => StudentAbsenceRecordModel.fromFirestore(
+              doc.data(),
+              doc.id,
+            ),
+          )
+          .toList();
     });
-    return result;
+  }
+
+  @override
+  Future<StudentAbsenceRecordModel> getStudentAbsenceRecord(
+    String courseId,
+    String studentUid,
+  ) async {
+    final docRef = _recordsRef(courseId).doc(studentUid);
+    final docSnap = await docRef.get();
+
+    if (docSnap.exists && docSnap.data() != null) {
+      return StudentAbsenceRecordModel.fromFirestore(
+        docSnap.data()!,
+        docSnap.id,
+      );
+    }
+
+    final userSnap = await _usersRef.doc(studentUid).get();
+    final courseSnap = await _coursesRef.doc(courseId).get();
+    final userData = userSnap.data() ?? const <String, dynamic>{};
+    final courseData = courseSnap.data() ?? const <String, dynamic>{};
+
+    final initialModel = StudentAbsenceRecordModel(
+      studentUid: studentUid,
+      studentName: (userData['fullName'] ?? '').toString(),
+      studentNo:
+          (userData['studentOrStaffNo'] ?? userData['studentNo'] ?? '')
+              .toString(),
+      courseId: courseId,
+      courseName: (courseData['courseName'] ?? courseId).toString(),
+      totalCourseHours: defaultTotalCourseHours,
+      absentHours: 0,
+      absencePercentage: 0.0,
+      isCriticalRisk: false,
+    );
+
+    try {
+      await docRef.set(initialModel.toJson());
+    } catch (_) {
+      // Yazma izni yoksa yine de modeli dön
+    }
+
+    return initialModel;
   }
 }
