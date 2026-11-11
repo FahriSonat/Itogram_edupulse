@@ -12,10 +12,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:itogram_edupulse/features/attendance/data/datasources/attendance_remote_datasource.dart';
+import 'package:itogram_edupulse/features/attendance/data/models/attendance_session_model.dart';
 
 const String _courseId = 'course-101';
 const String _sessionId = 'sess-1';
 const String _studentId = 'uid-1';
+const String _pin = '4821';
+const String _qrToken = 'EDUPULSE|$_courseId|$_sessionId|$_pin';
 const String _sessionPath = 'courses/$_courseId/attendance_sessions/$_sessionId';
 const String _recordPath = 'courses/$_courseId/attendance_records/$_studentId';
 
@@ -26,55 +29,65 @@ void main() {
   setUp(() {
     firestore = _FakeFirestore();
     dataSource = AttendanceRemoteDataSourceImpl(firestore: firestore);
+    firestore.docs['users/$_studentId'] = <String, dynamic>{
+      'fullName': 'Merve Kedersiz',
+      'studentOrStaffNo': '20261234',
+      'role': 'student',
+    };
+    firestore.docs['courses/$_courseId'] = <String, dynamic>{
+      'courseName': 'Mobil Programlama',
+    };
   });
 
   /// Kod [secondsAgo] saniye önce üretilmiş gibi bir yoklama oturumu kurar.
-  void seedSession({
-    required int secondsAgo,
-    bool isActive = true,
-    String pinCode = '4821',
-  }) {
+  void seedSession({required int secondsAgo, bool isActive = true}) {
     final DateTime createdAt =
         DateTime.now().subtract(Duration(seconds: secondsAgo));
     firestore.docs[_sessionPath] = <String, dynamic>{
       'courseId': _courseId,
-      'pinCode': pinCode,
-      'qrData': 'EDUPULSE|$_courseId|$_sessionId|$pinCode',
+      'pinCode': _pin,
+      'qrCodeToken': _qrToken,
       'isActive': isActive,
       'createdAt': Timestamp.fromDate(createdAt),
-      'expiresAt': Timestamp.fromDate(createdAt.add(const Duration(seconds: 60))),
+      'expiresAt':
+          Timestamp.fromDate(createdAt.add(const Duration(seconds: 60))),
+      'studentStatusMap': <String, dynamic>{},
     };
   }
 
-  Future<Map<String, dynamic>> submit({String? pin = '4821'}) {
+  /// Öğrencinin PIN veya QR ile yoklama vermesi.
+  /// sessionId "courseId/sessionId" biçiminde verilir; böylece datasource
+  /// oturumu doğrudan bulur.
+  Future<void> submit({String code = _pin, String sessionId = _sessionId}) {
     return dataSource.submitLiveAttendance(
-      courseId: _courseId,
-      sessionId: _sessionId,
-      studentId: _studentId,
-      studentName: 'Merve Kedersiz',
-      studentNo: '20261234',
-      pinOrQrToken: pin,
+      sessionId: '$_courseId/$sessionId',
+      studentUid: _studentId,
+      code: code,
     );
+  }
+
+  String? studentStatus([String path = _sessionPath]) {
+    final Map<String, dynamic>? statusMap =
+        firestore.docs[path]?['studentStatusMap'] as Map<String, dynamic>?;
+    return statusMap?[_studentId] as String?;
   }
 
   group('Kural 1: 60 saniyelik QR/PIN süresi', () {
     test('59. saniyede girilen PIN kabul edilir', () async {
       seedSession(secondsAgo: 59);
 
-      final Map<String, dynamic> result = await submit();
+      await submit();
 
-      expect(result['studentId'], _studentId);
-      expect(result['status'], 'present');
+      expect(studentStatus(), 'present');
       expect(firestore.docs[_recordPath], isNotNull);
     });
 
     test('59. saniyede QR içeriği ile de yoklama verilebilir', () async {
       seedSession(secondsAgo: 59);
 
-      final Map<String, dynamic> result =
-          await submit(pin: 'EDUPULSE|$_courseId|$_sessionId|4821');
+      await submit(code: _qrToken);
 
-      expect(result['status'], 'present');
+      expect(studentStatus(), 'present');
     });
 
     test('61. saniyede ExpiredQrPinException fırlatılır', () async {
@@ -87,6 +100,7 @@ void main() {
       seedSession(secondsAgo: 61);
 
       await expectLater(submit(), throwsA(isA<ExpiredQrPinException>()));
+      expect(studentStatus(), isNull);
       expect(firestore.docs.containsKey(_recordPath), isFalse);
     });
 
@@ -105,77 +119,72 @@ void main() {
       seedSession(secondsAgo: 10);
 
       await expectLater(
-        submit(pin: '0000'),
+        submit(code: '0000'),
         throwsA(
           allOf(isA<Exception>(), isNot(isA<ExpiredQrPinException>())),
         ),
       );
+      expect(studentStatus(), isNull);
     });
+
+    test(
+      'kod boş gönderilirse yoklama reddedilir',
+      () async {
+        seedSession(secondsAgo: 10);
+
+        await expectLater(submit(code: ''), throwsA(isA<Exception>()));
+        expect(studentStatus(), isNull);
+      },
+      skip: 'BUG (Geliştirici 3): submitLiveAttendance içinde '
+          '"trimmedCode.isNotEmpty &&" koşulu yüzünden boş kod PIN/QR '
+          'kontrolünü atlıyor; öğrenci kod girmeden yoklama verebiliyor. '
+          'Düzeltilince skip kaldırılacak.',
+    );
   });
 
   group('Eğitmen yeni kod ürettiğinde', () {
     test('expiresAt tam olarak createdAt + 60 saniyedir', () async {
-      final Map<String, dynamic> session =
-          await dataSource.createOrRefresh60sQrPinSession(
-        courseId: _courseId,
-        instructorId: 'teacher-1',
-        sessionId: _sessionId,
-      );
+      final AttendanceSessionModel session =
+          await dataSource.generateAttendanceSession(_courseId);
 
-      final DateTime createdAt = _toDate(session['createdAt']);
-      final DateTime expiresAt = _toDate(session['expiresAt']);
-      expect(expiresAt.difference(createdAt), const Duration(seconds: 60));
-      expect(session['isActive'], isTrue);
+      expect(
+        session.expiresAt.difference(session.createdAt),
+        const Duration(seconds: 60),
+      );
+      expect(session.isActive, isTrue);
     });
 
-    test('yenilenen kodla 59. saniyede yoklama verilebilir', () async {
-      await dataSource.createOrRefresh60sQrPinSession(
-        courseId: _courseId,
-        instructorId: 'teacher-1',
-        sessionId: _sessionId,
-      );
-      final String pin = firestore.docs[_sessionPath]!['pinCode'] as String;
+    test('şartnameye göre PIN 4 haneli olmalıdır', () async {
+      final AttendanceSessionModel session =
+          await dataSource.generateAttendanceSession(_courseId);
 
-      expect((await submit(pin: pin))['status'], 'present');
+      expect(session.pinCode, matches(RegExp(r'^\d{4}$')));
     });
 
-    test(
-      'şartnameye göre PIN 4 haneli olmalıdır',
-      () async {
-        final Map<String, dynamic> session =
-            await dataSource.createOrRefresh60sQrPinSession(
-          courseId: _courseId,
-          instructorId: 'teacher-1',
-          sessionId: _sessionId,
-        );
-        expect((session['pinCode'] as String).length, 4);
-      },
-      skip: 'BUG (Geliştirici 3): _generate6DigitPin 6 haneli PIN üretiyor, '
-          'şartname 4 haneli PIN istiyor. Düzeltilince skip kaldırılacak.',
-    );
+    test('üretilen kodla süre dolmadan yoklama verilebilir', () async {
+      final AttendanceSessionModel session =
+          await dataSource.generateAttendanceSession(_courseId);
+
+      await submit(code: session.pinCode, sessionId: session.sessionId);
+
+      expect(
+        studentStatus(
+          'courses/$_courseId/attendance_sessions/${session.sessionId}',
+        ),
+        'present',
+      );
+    });
   });
 
   group('Firestore transaction kuralı', () {
-    test(
-      'transaction içinde tüm okumalar yazmalardan önce yapılmalıdır',
-      () async {
-        firestore.strictTransactions = true;
-        seedSession(secondsAgo: 10);
+    test('transaction içinde tüm okumalar yazmalardan önce yapılır', () async {
+      // _FakeTransaction gerçek Firestore gibi yazmadan sonra okumaya izin
+      // vermez (strictTransactions varsayılan olarak açık).
+      seedSession(secondsAgo: 10);
 
-        await expectLater(submit(), completes);
-      },
-      skip: 'BUG (Geliştirici 3): submitLiveAttendance önce session dökümanını '
-          'update ediyor, sonra record dökümanını get ediyor. Gerçek Firestore '
-          'bu durumda hata fırlatır ve geçerli kodla bile yoklama verilemez. '
-          'transaction.get(recordDocRef) satırı update öncesine taşınmalı.',
-    );
+      await expectLater(submit(), completes);
+    });
   });
-}
-
-DateTime _toDate(Object? value) {
-  if (value is Timestamp) return value.toDate();
-  if (value is DateTime) return value;
-  return DateTime.parse(value.toString());
 }
 
 // ---------------------------------------------------------------------------
@@ -183,10 +192,11 @@ DateTime _toDate(Object? value) {
 // ---------------------------------------------------------------------------
 
 class _FakeFirestore extends Fake implements FirebaseFirestore {
-  final Map<String, Map<String, dynamic>> docs = <String, Map<String, dynamic>>{};
+  final Map<String, Map<String, dynamic>> docs =
+      <String, Map<String, dynamic>>{};
 
   /// true ise gerçek Firestore gibi "yazmadan sonra okuma" yasaklanır.
-  bool strictTransactions = false;
+  bool strictTransactions = true;
 
   @override
   CollectionReference<Map<String, dynamic>> collection(String collectionPath) =>
@@ -205,13 +215,28 @@ class _FakeFirestore extends Fake implements FirebaseFirestore {
   }
 }
 
+// Not: generateAttendanceSession içindeki öğrenci listesi hazırlığı
+// (collection get / where / batch) bu sahte sınıflarda desteklenmez;
+// datasource o adımı try/catch ile atladığı için Kural 1 testlerini etkilemez.
 class _FakeCollection extends Fake
     implements CollectionReference<Map<String, dynamic>> {
   _FakeCollection(this._store, this._path);
 
   final _FakeFirestore _store;
   final String _path;
-  int _autoId = 0;
+  static int _autoId = 0;
+
+  @override
+  String get path => _path;
+
+  @override
+  String get id => _path.split('/').last;
+
+  @override
+  DocumentReference<Map<String, dynamic>>? get parent {
+    final int slash = _path.lastIndexOf('/');
+    return slash == -1 ? null : _FakeDocument(_store, _path.substring(0, slash));
+  }
 
   @override
   DocumentReference<Map<String, dynamic>> doc([String? path]) =>
@@ -232,6 +257,16 @@ class _FakeDocument extends Fake
 
   @override
   FirebaseFirestore get firestore => _store;
+
+  @override
+  CollectionReference<Map<String, dynamic>> get parent =>
+      _FakeCollection(_store, path.substring(0, path.lastIndexOf('/')));
+
+  @override
+  Future<DocumentSnapshot<Map<String, dynamic>>> get([
+    GetOptions? options,
+  ]) async =>
+      _FakeSnapshot(_store.docs[path]);
 
   @override
   Future<void> set(Map<String, dynamic> data, [SetOptions? options]) async {

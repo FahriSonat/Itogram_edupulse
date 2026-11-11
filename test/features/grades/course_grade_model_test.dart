@@ -92,19 +92,14 @@ void main() {
       }
     });
 
-    test(
-      'bilinmeyen harf notu uygulamayı çökertmemeli',
-      () {
-        final Map<String, dynamic> bad = Map<String, dynamic>.of(json)
-          ..['letterGrade'] = 'XX';
-        expect(
-          () => CourseGradeModel.fromFirestore(bad, 'grade-1'),
-          returnsNormally,
-        );
-      },
-      skip: 'BUG (Geliştirici 4): letterGrade firstWhere içinde orElse yok, '
-          'bilinmeyen değerde StateError fırlatıyor. Düzeltilince skip kaldırılacak.',
-    );
+    test('bilinmeyen harf notu uygulamayı çökertmemeli', () {
+      final Map<String, dynamic> bad = Map<String, dynamic>.of(json)
+        ..['letterGrade'] = 'XX';
+      expect(
+        () => CourseGradeModel.fromFirestore(bad, 'grade-1'),
+        returnsNormally,
+      );
+    });
 
     test('copyWith sadece verilen alanı değiştirir', () {
       final CourseGradeModel updated = model.copyWith(bonusScore: 10);
