@@ -188,9 +188,13 @@ class _AttendanceCta extends StatelessWidget {
                     children: [
                       const Icon(Icons.timer_outlined, size: 13, color: Colors.white),
                       const SizedBox(width: 4),
-                      Text(
-                        '60 sn geçerli kod',
-                        style: theme.textTheme.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+                      Flexible(
+                        child: Text(
+                          '60 sn geçerli kod',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ],
                   ),
