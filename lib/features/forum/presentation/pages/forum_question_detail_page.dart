@@ -15,18 +15,23 @@ import '../cubit/forum_cubit.dart';
 import '../cubit/forum_state.dart';
 import '../widgets/instructor_resolved_answer_card.dart';
 
-/// Soru detayı: fotoğraf (Hero animasyonlu büyütme), yanıtlar ve yanıt yazma.
-/// Eğitmen her yanıtın yanında "Çözüldü Olarak İşaretle" butonunu görür.
-///
-/// Router: `/forum/question/:questionId` (RouteNames.forumQuestionPath).
+/// FORUM SORU DETAY VE CEVAPLAMA SAYFASI.
+/// 
+/// - Sorunun tam metnini, ders/konu etiketlerini ve varsa eklenen fotoğrafı gösterir.
+/// - Fotoğrafa dokunulduğunda [Hero] animasyonu ile tam ekran yakınlaştırılabilir ([InteractiveViewer]) açılır.
+/// - Sorunun altındaki yanıtlar listelenir.
+/// - Eğitmen, doğru olan bir yanıtın yanında "Çözüldü Olarak İşaretle" butonuna basarak
+///   soruyu çözüme kavuşturabilir ve cevaba yeşil eğitmen onay rozeti kazandırabilir.
+/// - Alt kısımdaki giriş çubuğu üzerinden öğrenciler ve eğitmenler anında yanıt yazabilir.
 class ForumQuestionDetailPage extends StatelessWidget {
   const ForumQuestionDetailPage({super.key, required this.questionId});
 
   final String questionId;
 
+  /// Hero animasyonu için benzersiz görsel etiketi üretir.
   static String heroTagFor(String questionId) => 'forum_image_$questionId';
 
-  /// Soru fotoğrafını tam ekran, yakınlaştırılabilir açar.
+  /// Soru görselini tam ekran, siyah yarı saydam zemin üzerinde ve yakınlaştırılabilir açar.
   static Future<void> openImage(BuildContext context, String questionId, String imageUrl) {
     return Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -48,6 +53,7 @@ class ForumQuestionDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Soru ID'sine ait detay ve yanıtları izleyen ForumCubit başlatılır
     return BlocProvider<ForumCubit>(
       create: (_) => GetIt.instance<ForumCubit>()
         ..start()
@@ -57,6 +63,7 @@ class ForumQuestionDetailPage extends StatelessWidget {
   }
 }
 
+/// Soru başlığı, yanıt listesi ve altta sabit duran yanıt yazma çubuğu.
 class _DetailView extends StatefulWidget {
   const _DetailView({required this.questionId});
 
@@ -67,6 +74,7 @@ class _DetailView extends StatefulWidget {
 }
 
 class _DetailViewState extends State<_DetailView> {
+  // Yanıt metni giriş kontrolcüsü
   final TextEditingController _answerController = TextEditingController();
 
   @override
@@ -75,15 +83,18 @@ class _DetailViewState extends State<_DetailView> {
     super.dispose();
   }
 
+  /// Yazılan yanıtı backend'e iletir ve giriş alanını temizler.
   Future<void> _send() async {
     final user = context.readCurrentUser();
     if (user == null || _answerController.text.trim().isEmpty) return;
+
     final ok = await context.read<ForumCubit>().postAnswer(
           questionId: widget.questionId,
           responderName: user.fullName,
           responderRole: user.role,
           answerText: _answerController.text,
         );
+
     if (ok && mounted) {
       _answerController.clear();
       FocusScope.of(context).unfocus();
@@ -93,28 +104,39 @@ class _DetailViewState extends State<_DetailView> {
   @override
   Widget build(BuildContext context) {
     final role = context.currentRole;
+
     return BlocConsumer<ForumCubit, ForumState>(
       listenWhen: (p, c) => c.actionMessage != null && p.actionMessage != c.actionMessage,
       listener: (context, state) =>
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.actionMessage!))),
       builder: (context, state) {
         final cubit = context.read<ForumCubit>();
+
+        // Hata ve yüklenme durumları
         if (state.status == ViewStatus.failure) return ErrorStateView(message: state.errorMessage, onRetry: cubit.start);
         if (state.status.isLoading) return const LoadingStateView(message: 'Soru yükleniyor...');
+
         final question = state.openQuestion;
         if (question == null) {
           return const EmptyStateView(title: 'Soru bulunamadı', icon: Icons.search_off_rounded);
         }
+
         return Column(
           children: [
+            // Soru ve Yanıtların kaydırılabilir listesi
             Expanded(
               child: ListView(
                 padding: AppDimensions.paddingAll16,
                 children: [
+                  // Soru Başlığı, etiketleri ve varsa görseli
                   _QuestionHeader(question: question),
                   const SizedBox(height: AppDimensions.p16),
+
+                  // Yanıtlar Bölümü Başlığı
                   Text('Yanıtlar (${state.answers.length})', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: AppDimensions.p8),
+
+                  // Yanıtların yüklenme veya listelenme durumu
                   if (state.answersStatus.isLoading)
                     const Padding(padding: AppDimensions.paddingAll16, child: Center(child: CircularProgressIndicator()))
                   else if (state.answers.isEmpty)
@@ -126,9 +148,9 @@ class _DetailViewState extends State<_DetailView> {
                         responderName: a.responderName,
                         responderRole: UserRoleX.fromJson(a.responderRole),
                         answerText: a.answerText,
-                        // Yanıt modelinde zaman alanı yok (Geliştirici 4).
                         answeredAt: DateTime.now(),
                         isInstructorApproved: a.isInstructorApproved,
+                        // Yalnızca eğitmen ve soru henüz çözülmemişse butonu aktif yap
                         canMarkAsResolved: role == UserRole.instructor && !question.isResolved,
                         onMarkAsResolved: () =>
                             cubit.markResolved(questionId: question.questionId, answerId: a.answerId, role: role),
@@ -138,12 +160,15 @@ class _DetailViewState extends State<_DetailView> {
                 ],
               ),
             ),
+
+            // Ekranın altında sabit duran yanıt yazma alanı
             SafeArea(
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(AppDimensions.p16, AppDimensions.p8, AppDimensions.p8, AppDimensions.p8),
                 child: Row(
                   children: [
+                    // Yanıt giriş alanı
                     Expanded(
                       child: TextField(
                         key: const Key('forum_answer_field'),
@@ -155,6 +180,7 @@ class _DetailViewState extends State<_DetailView> {
                         decoration: const InputDecoration(hintText: 'Yanıtını yaz...'),
                       ),
                     ),
+                    // Yanıtı gönder butonu
                     IconButton.filled(
                       key: const Key('forum_answer_send'),
                       onPressed: state.isSubmitting ? null : _send,
@@ -172,6 +198,7 @@ class _DetailViewState extends State<_DetailView> {
   }
 }
 
+/// Sorunun metnini, yazarını, rozetlerini ve tıklanabilir fotoğrafını gösteren başlık kartı.
 class _QuestionHeader extends StatelessWidget {
   const _QuestionHeader({required this.question});
 
@@ -181,9 +208,11 @@ class _QuestionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final imageUrl = question.imageUrl;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Geri Dön Butonu ve Ders/Konu Etiket Çipleri
         Row(
           children: [
             if (Navigator.canPop(context))
@@ -210,9 +239,15 @@ class _QuestionHeader extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppDimensions.p8),
+
+        // Soru Metni
         Text(question.questionText, style: theme.textTheme.titleMedium),
         const SizedBox(height: AppDimensions.p4),
+
+        // Soran Kişinin Adı
         Text('Soran: ${question.authorName}', style: theme.textTheme.bodySmall),
+
+        // Soruya eklenmiş bir görsel varsa tıklanabilir Hero önizlemesi
         if (imageUrl != null && imageUrl.isNotEmpty) ...[
           const SizedBox(height: AppDimensions.p12),
           GestureDetector(

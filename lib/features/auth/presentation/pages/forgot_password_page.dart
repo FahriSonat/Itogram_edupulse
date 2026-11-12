@@ -9,7 +9,11 @@ import '../cubit/auth_cubit.dart';
 import '../cubit/auth_state.dart';
 import '../widgets/auth_text_field.dart';
 
-/// ŞİFREMİ UNUTTUM EKRANI: kayıtlı e-postaya Firebase şifre sıfırlama maili.
+/// ŞİFREMİ UNUTTUM EKRANI (Forgot Password Page).
+/// 
+/// Kullanıcının kayıtlı e-posta adresine Firebase Authentication üzerinden
+/// parola sıfırlama bağlantısı gönderilmesini sağlayan sayfadır.
+/// Bağlantı gönderildiğinde ekran [_SentView] başarılı durum görünümüne geçer.
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
 
@@ -18,7 +22,10 @@ class ForgotPasswordPage extends StatefulWidget {
 }
 
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+  // E-posta form kontrolü için anahtar
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+
+  // E-posta girdi kontrolcüsü
   final TextEditingController _emailController = TextEditingController();
 
   @override
@@ -27,6 +34,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     super.dispose();
   }
 
+  /// E-posta alanını doğrular ve AuthCubit üzerinden sıfırlama e-postası tetikler.
   void _submit() {
     FocusScope.of(context).unfocus();
     if (!(_formKey.currentState?.validate() ?? false)) return;
@@ -36,10 +44,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Şifremi Unuttum')),
       body: SafeArea(
         child: BlocConsumer<AuthCubit, AuthState>(
+          // Hata durumunda SnackBar ile bildirim verme
           listener: (context, state) {
             if (state is AuthError) {
               ScaffoldMessenger.of(context)
@@ -48,10 +58,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
             }
           },
           builder: (context, state) {
+            // E-posta başarıyla gönderildiyse onay ekranını göster
             if (state is PasswordResetSent) {
               return _SentView(email: state.email);
             }
+
             final isLoading = state is AuthLoading;
+
             return SingleChildScrollView(
               padding: AppDimensions.paddingAll24,
               child: Form(
@@ -59,6 +72,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Bilgilendirme ikonu ve yönerge
                     Icon(Icons.mark_email_unread_outlined, size: 56, color: theme.colorScheme.primary),
                     const SizedBox(height: AppDimensions.p16),
                     Text(
@@ -67,6 +81,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppDimensions.p24),
+
+                    // E-posta Metin Alanı
                     AuthTextField(
                       key: const Key('forgot_email'),
                       controller: _emailController,
@@ -79,6 +95,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       enabled: !isLoading,
                     ),
                     const SizedBox(height: AppDimensions.p24),
+
+                    // Sıfırlama Bağlantısı Gönder Butonu
                     FilledButton(
                       key: const Key('forgot_submit'),
                       onPressed: isLoading ? null : _submit,
@@ -98,6 +116,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   }
 }
 
+/// Parola sıfırlama e-postası başarıyla gönderildiğinde gösterilen onay görünümü.
 class _SentView extends StatelessWidget {
   const _SentView({required this.email});
 
@@ -106,14 +125,18 @@ class _SentView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Center(
       child: SingleChildScrollView(
         padding: AppDimensions.paddingAll24,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Başarılı onay ikonu
             const Icon(Icons.check_circle_rounded, size: 64, color: AppColors.resolvedGreen),
             const SizedBox(height: AppDimensions.p16),
+
+            // Onay başlığı ve detay metni
             Text('Bağlantı gönderildi', style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
             const SizedBox(height: AppDimensions.p8),
             Text(
@@ -121,6 +144,8 @@ class _SentView extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppDimensions.p24),
+
+            // Giriş ekranına dönüş butonu
             OutlinedButton(
               onPressed: () => Navigator.maybePop(context),
               child: const Text('Giriş ekranına dön'),

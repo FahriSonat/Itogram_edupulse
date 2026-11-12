@@ -316,7 +316,11 @@ void main() {
 
       expect(find.byType(AppDrawerMenu), findsOneWidget);
       for (final d in AppDrawerMenu.destinations) {
-        expect(find.text(d.title), findsOneWidget, reason: d.title);
+        expect(
+          find.descendant(of: find.byType(AppDrawerMenu), matching: find.text(d.title)),
+          findsOneWidget,
+          reason: d.title,
+        );
       }
       expect(AppDrawerMenu.destinations.map((d) => d.title), [
         'Ana Sayfa (Duyurular)',

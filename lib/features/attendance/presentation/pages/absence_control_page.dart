@@ -21,9 +21,14 @@ import '../widgets/bell_curve_chart_painter.dart';
 import '../widgets/critical_absence_red_list.dart';
 import '../widgets/student_absence_progress_card.dart';
 
-/// 2.4 DEVAMSIZLIK KONTROL: öğrenci ders bazlı saat / yüzde devamsızlığını
-/// görür; eğitmen sınıfın çan eğrisini, %20 kırmızı listesini ve yoklama
-/// ekleme / değiştirme kontrollerini görür.
+/// 2.4 DEVAMSIZLIK KONTROL EKRANI (Absence Control Page).
+/// 
+/// Role-Based UI (Kural 5: Rol bazlı görünüm):
+/// - Öğrenci: Ders bazında toplam saat, devamsız kalınan saat ve yüzdelik oran ilerleme çubuğunu görür.
+///   %20 kritik devamsızlık eşiği aşıldığında kırmızı risk uyarı bandı görüntülenir.
+/// - Eğitmen: Sınıfın çan eğrisi istatistiklerini ([BellCurveChartWidget]), %20 sınırını aşan
+///   riskli öğrencilerin kırmızı listesini ([CriticalAbsenceRedList]) ve manuel yoklama düzenleme
+///   menülerini görür.
 class AbsenceControlPage extends StatelessWidget {
   const AbsenceControlPage({super.key});
 
@@ -31,6 +36,8 @@ class AbsenceControlPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = context.currentUser;
     final role = context.currentRole;
+
+    // Kullanıcı rolüne göre verileri yükleyen AbsenceControlCubit sağlayıcısı
     return BlocProvider<AbsenceControlCubit>(
       create: (_) {
         final cubit = GetIt.instance<AbsenceControlCubit>();
@@ -38,6 +45,7 @@ class AbsenceControlPage extends StatelessWidget {
             ? (cubit..loadForInstructor())
             : (cubit..loadForStudent(user?.uid ?? ''));
       },
+      // Rol koruma sarmalayıcısı: Öğrenci ve Eğitmen arayüzlerini birbirinden ayırır
       child: RoleVisibilityGuard(
         currentRole: role,
         studentBuilder: (_) => const _StudentAbsenceView(),
@@ -47,28 +55,36 @@ class AbsenceControlPage extends StatelessWidget {
   }
 }
 
+/// Yüklenme ve hata durumlarını tek elden yöneten durum kalkanı fonksiyonu.
 Widget _stateShield(BuildContext context, AbsenceControlState state, VoidCallback onRetry, Widget Function() loaded) {
-  if (state.status.isLoading && state.records.isEmpty) return const LoadingStateView(message: 'Devamsızlık verileri yükleniyor...');
-  if (state.status == ViewStatus.failure) return ErrorStateView(message: state.errorMessage, onRetry: onRetry);
+  if (state.status.isLoading && state.records.isEmpty) {
+    return const LoadingStateView(message: 'Devamsızlık verileri yükleniyor...');
+  }
+  if (state.status == ViewStatus.failure) {
+    return ErrorStateView(message: state.errorMessage, onRetry: onRetry);
+  }
   return loaded();
 }
 
 // =========================================================================
-// Öğrenci
+// Öğrenci Görünümü
 // =========================================================================
 
+/// Öğrencinin kayıtlı olduğu derslerdeki devamsızlık oranlarını incelediği ekran.
 class _StudentAbsenceView extends StatelessWidget {
   const _StudentAbsenceView();
 
   @override
   Widget build(BuildContext context) {
     final uid = context.currentUser?.uid ?? '';
+
     return BlocBuilder<AbsenceControlCubit, AbsenceControlState>(
       builder: (context, state) => _stateShield(
         context,
         state,
         () => context.read<AbsenceControlCubit>().loadForStudent(uid),
         () {
+          // Devamsızlık kaydı yoksa boş durum ekranı
           if (state.records.isEmpty) {
             return const EmptyStateView(
               title: 'Devamsızlık kaydı yok',
@@ -76,14 +92,19 @@ class _StudentAbsenceView extends StatelessWidget {
               icon: Icons.event_available_rounded,
             );
           }
+
+          // %20 sınırını aşarak kritik riske giren dersleri filtreliyoruz
           final critical = state.records.where((r) => r.isCriticalRisk).toList();
+
           return ListView(
             padding: AppDimensions.paddingAll16,
             children: [
+              // Kritik sınır aşıldıysa gösterilen kırmızı uyarı bandı
               if (critical.isNotEmpty) ...[
                 _CriticalBanner(courseNames: critical.map((r) => r.courseName).toList()),
                 const SizedBox(height: AppDimensions.p16),
               ],
+              // Her bir ders için devamsızlık ilerleme kartları
               for (final r in state.records) ...[
                 StudentAbsenceProgressCard(
                   courseName: r.courseName,
@@ -100,6 +121,7 @@ class _StudentAbsenceView extends StatelessWidget {
   }
 }
 
+/// Devamsızlıkta kritik risk (%20) uyarısını vurgulayan kırmızı bant.
 class _CriticalBanner extends StatelessWidget {
   const _CriticalBanner({required this.courseNames});
 
@@ -131,9 +153,10 @@ class _CriticalBanner extends StatelessWidget {
 }
 
 // =========================================================================
-// Eğitmen
+// Eğitmen Görünümü
 // =========================================================================
 
+/// Eğitmenin sınıf genelindeki devamsızlık çan eğrisini ve riskli öğrencileri gördüğü ekran.
 class _InstructorAbsenceView extends StatelessWidget {
   const _InstructorAbsenceView();
 
@@ -145,6 +168,8 @@ class _InstructorAbsenceView extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.actionMessage!))),
       builder: (context, state) {
         final cubit = context.read<AbsenceControlCubit>();
+
+        // Eğitmenin kayıtlı dersi yoksa boş durum ekranı gösterilir
         if (state.status != ViewStatus.failure && state.courses.isEmpty && !state.status.isLoading) {
           return const EmptyStateView(
             title: 'Ders bulunamadı',
@@ -152,9 +177,11 @@ class _InstructorAbsenceView extends StatelessWidget {
             icon: Icons.event_busy_rounded,
           );
         }
+
         return ListView(
           padding: AppDimensions.paddingAll16,
           children: [
+            // İlgili dersi seçmek için açılır liste
             if (state.courses.isNotEmpty)
               CourseDropdown(
                 courses: state.courses,
@@ -162,15 +189,19 @@ class _InstructorAbsenceView extends StatelessWidget {
                 onChanged: cubit.selectCourse,
               ),
             const SizedBox(height: AppDimensions.p16),
+
+            // Durum kalkanı kontrolü ile içerik oluşturma
             _stateShield(context, state, cubit.loadForInstructor, () {
               final d = state.distribution;
               final courseName = state.courses
                   .where((c) => c.courseId == state.selectedCourseId)
                   .map((c) => c.courseName)
                   .firstOrNull;
+
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Sınıfın vize-final istatistik çan eğrisi grafiği
                   BellCurveChartWidget(
                     midtermAverage: d.midtermAverage,
                     finalAverage: d.finalAverage,
@@ -179,6 +210,8 @@ class _InstructorAbsenceView extends StatelessWidget {
                     sampleSize: d.sampleSize,
                   ),
                   const SizedBox(height: AppDimensions.p16),
+
+                  // %20 Devamsızlık Kırmızı Listesi ve Tek Tuşla Uyarı Gönderme
                   CriticalAbsenceRedList(
                     atRiskStudents: [
                       for (final r in state.criticalRecords)
@@ -197,6 +230,8 @@ class _InstructorAbsenceView extends StatelessWidget {
                     onSendPushWarning: (s) => cubit.sendRiskWarning(s.studentUid),
                   ),
                   const SizedBox(height: AppDimensions.p8),
+
+                  // Sınıfın tüm öğrenci yoklama listesi başlığı
                   const SectionHeader(title: 'Sınıf Yoklama Kayıtları', padding: EdgeInsets.symmetric(vertical: 8)),
                   if (state.records.isEmpty)
                     const Padding(
@@ -204,6 +239,7 @@ class _InstructorAbsenceView extends StatelessWidget {
                       child: Text('Bu derse kayıtlı öğrenci yoklama kaydı yok.'),
                     )
                   else
+                    // Her bir öğrenci için satır ve yoklama güncelleme butonu
                     for (final r in state.records) _StudentRow(record: r),
                 ],
               );
@@ -215,6 +251,7 @@ class _InstructorAbsenceView extends StatelessWidget {
   }
 }
 
+/// Eğitmen ekranında tek bir öğrencinin devamsızlık durumunu ve aksiyon menüsünü gösteren satır.
 class _StudentRow extends StatelessWidget {
   const _StudentRow({required this.record});
 
@@ -224,9 +261,11 @@ class _StudentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final cubit = context.read<AbsenceControlCubit>();
     final critical = record.isCriticalRisk || record.absencePercentage >= 20;
+
     return Card(
       margin: const EdgeInsets.only(bottom: AppDimensions.p8),
       child: ListTile(
+        // Kritik durumdaki öğrenci için kırmızı ünlem ikonu
         leading: CircleAvatar(
           backgroundColor: (critical ? AppColors.criticalAbsenceRed : AppColors.resolvedGreen).withValues(alpha: 0.15),
           child: Icon(
@@ -240,6 +279,7 @@ class _StudentRow extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
+        // Eğitmenin öğrenciye doğrudan devamsızlık ekleyebildiği veya silebildiği menü
         trailing: PopupMenuButton<AttendanceStatus>(
           tooltip: 'Yoklama ekle / değiştir',
           icon: const Icon(Icons.edit_calendar_rounded),

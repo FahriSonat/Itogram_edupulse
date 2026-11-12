@@ -18,13 +18,19 @@ import '../widgets/course_visuals.dart';
 import '../widgets/day_selector_tabs.dart';
 import '../widgets/instructor_course_editor_modal.dart';
 
-/// 2.1 DERS PROGRAMI: öğrenci haftalık derslerini ve derse kalan süreyi görür;
-/// eğitmen ek olarak her kartta Düzenle / Sil ve "Yeni Ders Ekle" butonunu görür.
+/// 2.1 HAFTALIK DERS PROGRAMI EKRANI (Weekly Schedule Page).
+/// 
+/// - Gün seçici sekme çubuğu ([DaySelectorTabs]) ile Pazartesi-Cuma (hafta sonu dersi varsa Pazar'a kadar)
+///   günler arasında geçiş yapılır.
+/// - Öğrenci ve eğitmen o güne ait dersleri saat sıralı kartlar ([CourseScheduleCard]) halinde görür.
+/// - Başlama zamanı yaklaşan sıradaki ders parlak kenarlıkla (isHighlighted) vurgulanır.
+/// - Eğitmenler ders kartı üzerinde "Düzenle" ve "Sil" butonlarını ve yeni ders ekleme FAB'ını görür.
 class WeeklySchedulePage extends StatelessWidget {
   const WeeklySchedulePage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Ders programı verilerini yöneten ScheduleCubit sağlayıcısı başlatılır
     return BlocProvider<ScheduleCubit>(
       create: (_) => GetIt.instance<ScheduleCubit>()..start(),
       child: const _ScheduleView(),
@@ -32,14 +38,17 @@ class WeeklySchedulePage extends StatelessWidget {
   }
 }
 
+/// Ders programı görünümü: Gün sekmeleri, ders kartları listesi ve eğitmen aksiyon butonu.
 class _ScheduleView extends StatelessWidget {
   const _ScheduleView();
 
   @override
   Widget build(BuildContext context) {
     final role = context.currentRole;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // Yalnızca eğitmenlerin programa yeni ders eklemesini sağlayan yüzen buton
       floatingActionButton: RoleVisibilityGuard.onlyInstructor(
         currentRole: role,
         child: FloatingActionButton.extended(
@@ -55,8 +64,10 @@ class _ScheduleView extends StatelessWidget {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.actionMessage!))),
         builder: (context, state) {
           final cubit = context.read<ScheduleCubit>();
+
           return Column(
             children: [
+              // Haftanın günlerini gösteren yatay sekme çubuğu
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppDimensions.p16, AppDimensions.p12, AppDimensions.p16, 0),
                 child: DaySelectorTabs(
@@ -65,6 +76,7 @@ class _ScheduleView extends StatelessWidget {
                   includeWeekend: state.courses.any((c) => c.dayOfWeek > 5),
                 ),
               ),
+              // Seçilen güne ait ders listesi
               Expanded(child: _body(context, state, role)),
             ],
           );
@@ -73,12 +85,15 @@ class _ScheduleView extends StatelessWidget {
     );
   }
 
+  /// Seçili günün derslerini duruma göre (yükleniyor, hata, boş veya liste) oluşturan gövde.
   Widget _body(BuildContext context, ScheduleState state, UserRole role) {
     final cubit = context.read<ScheduleCubit>();
+
     if (state.status.isLoading) return const LoadingStateView(message: 'Ders programı yükleniyor...');
     if (state.status == ViewStatus.failure) {
       return ErrorStateView(message: state.errorMessage, onRetry: cubit.start);
     }
+
     final courses = state.coursesOfSelectedDay;
     if (courses.isEmpty) {
       return EmptyStateView(
@@ -87,8 +102,11 @@ class _ScheduleView extends StatelessWidget {
         icon: Icons.free_breakfast_outlined,
       );
     }
+
+    // Sıradaki aktif veya başlayacak olan ders tespiti
     final next = cubit.nextCourse;
     final isInstructor = role == UserRole.instructor;
+
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(AppDimensions.p16, AppDimensions.p16, AppDimensions.p16, 96),
       itemCount: courses.length,
@@ -115,6 +133,7 @@ class _ScheduleView extends StatelessWidget {
     );
   }
 
+  /// Eğitmenin yeni ders eklediği veya mevcut dersi güncellediği modal formunu açar.
   static Future<void> _openEditor(BuildContext context, {CourseScheduleEntity? course}) {
     final cubit = context.read<ScheduleCubit>();
     return InstructorCourseEditorModal.show(
@@ -151,6 +170,7 @@ class _ScheduleView extends StatelessWidget {
     );
   }
 
+  /// Dersi programdan çıkarmadan önce onay isteyen diyalog penceresi.
   static Future<void> _confirmDelete(BuildContext context, CourseScheduleEntity course) async {
     final cubit = context.read<ScheduleCubit>();
     final ok = await showDialog<bool>(

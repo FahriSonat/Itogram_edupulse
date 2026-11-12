@@ -275,8 +275,20 @@ abstract final class AppTheme {
         unselectedLabelStyle: _headingStyle(fontSize: 14, fontWeight: FontWeight.w400),
       ),
 
-      // Alt paneller (modal formlar kendi köşeli kabını çizer)
-      bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.transparent, elevation: 0),
+      // -------------------------------------------------------------------------
+      // Alt paneller (Modal Bottom Sheet):
+      // Açık ve koyu temada varsayılan olarak opak yüzey (p.surface) ve 24dp yuvarlatılmış
+      // üst köşeler atanır. Böylece doğrudan açılan bottom sheet pencereleri beyaz modda
+      // şeffaf görünmez, yüksek kontrastlı ve okunabilir bir arka planla açılır.
+      // Kendi özel kabını çizen formlar ise `backgroundColor: Colors.transparent` geçebilir.
+      // -------------------------------------------------------------------------
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: p.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppDimensions.r24)),
+        ),
+      ),
 
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,

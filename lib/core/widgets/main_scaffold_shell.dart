@@ -12,8 +12,10 @@ import 'atmosphere/ambient_background.dart';
 import 'custom_app_bar.dart';
 
 /// [MainScaffoldShell] uygulamanın ana çerçevesidir:
-/// üstte [CustomAppBar], solda açılır-kapanır [AppDrawerMenu] ve altta hızlı
-/// erişim sağlayan kalıcı [BottomNavigationBar].
+/// - Üstte [CustomAppBar] (Sayfa başlığı, rol rozeti, bildirim zili).
+/// - Solda açılır-kapanır [AppDrawerMenu] (Tüm modüllere erişim ve profil/çıkış alanı).
+/// - Altta hızlı erişim sağlayan kalıcı [_PersistentBottomNavigationBar].
+/// - Arka planda tüm ekranlara ortam ışığı veren [AmbientBackground].
 ///
 /// GoRouter `ShellRoute` ile `MainScaffoldShell(child: child)` biçiminde
 /// doğrudan veya isteğe bağlı rol/kullanıcı/geri-çağrı parametreleriyle
@@ -50,7 +52,7 @@ class MainScaffoldShell extends StatelessWidget {
     return -1;
   }
 
-  /// Rota yoluna karşılık gelen varsayılan başlık.
+  /// Rota yoluna karşılık gelen varsayılan başlık metni.
   static String titleForRoute(String route) {
     if (route.startsWith('/schedule')) return AppStrings.navSchedule;
     if (route.startsWith('/live-attendance')) return AppStrings.navLiveAttendance;
@@ -78,6 +80,7 @@ class MainScaffoldShell extends StatelessWidget {
   final List<Widget>? appBarActions;
   final Widget? floatingActionButton;
 
+  /// Alt gezinme çubuğunda (Bottom Navigation) yer alan 5 ana sekme
   static const List<_TabItem> _tabs = [
     _TabItem(Icons.home_outlined, Icons.home_rounded, AppStrings.tabHome),
     _TabItem(Icons.calendar_today_outlined, Icons.calendar_today_rounded, AppStrings.tabSchedule),
@@ -88,6 +91,7 @@ class MainScaffoldShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // AuthCubit üzerinden giriş yapmış olan kullanıcının bilgilerini alıyoruz
     AuthCubit? authCubit;
     try {
       authCubit = BlocProvider.of<AuthCubit>(context, listen: true);
@@ -110,6 +114,7 @@ class MainScaffoldShell extends StatelessWidget {
                 : authUser.email));
     final resolvedOnLogout = onLogout ?? authCubit?.logout;
 
+    // Aktif GoRouter rotasını çözümleme
     final router = GoRouter.maybeOf(context);
     final delegatePath = router?.routerDelegate.currentConfiguration.uri.path;
     final infoPath = router?.routeInformationProvider.value.uri.path;
@@ -124,6 +129,7 @@ class MainScaffoldShell extends StatelessWidget {
     return AmbientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        // Özel tasarlanmış üst bar
         appBar: CustomAppBar(
           title: resolvedTitle,
           currentRole: resolvedRole,
@@ -132,6 +138,7 @@ class MainScaffoldShell extends StatelessWidget {
           onNotificationPressed: onNotificationPressed,
           unreadNotificationCount: unreadNotifications,
         ),
+        // Soldan açılan yan çekmece menü
         drawer: AppDrawerMenu(
           currentRoute: resolvedRoute,
           userName: resolvedUserName,
@@ -140,8 +147,10 @@ class MainScaffoldShell extends StatelessWidget {
           onNavigate: onDrawerNavigate ?? (route) => router?.go(route),
           onLogout: resolvedOnLogout,
         ),
+        // Aktif sekmenin gövde widget'ı
         body: child,
         floatingActionButton: floatingActionButton,
+        // Alt sabit navigasyon çubuğu
         bottomNavigationBar: _PersistentBottomNavigationBar(
           tabs: _tabs,
           currentIndex: safeIndex,
@@ -152,6 +161,7 @@ class MainScaffoldShell extends StatelessWidget {
   }
 }
 
+/// Alt gezinme sekmesi veri modeli.
 class _TabItem {
   const _TabItem(this.icon, this.activeIcon, this.label);
 
@@ -202,6 +212,7 @@ class _PersistentBottomNavigationBar extends StatelessWidget {
   }
 }
 
+/// Seçili alt sekme ikonunun etrafına yumuşak yuvarlak arka plan (pill) çizen animasyonlu bileşen.
 class _PillIcon extends StatelessWidget {
   const _PillIcon({required this.icon, required this.selected});
 

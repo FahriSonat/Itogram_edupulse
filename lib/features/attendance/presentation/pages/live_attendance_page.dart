@@ -19,9 +19,15 @@ import '../widgets/dynamic_qr_pin_board.dart';
 import '../widgets/live_attendance_roster_tabs.dart';
 import '../widgets/student_qr_pin_scanner.dart';
 
-/// 2.2 CANLI YOKLAMA: öğrenci 4 haneli PIN girer (QR okutma kamera paketi
-/// eklenince açılır); eğitmen 60 saniyede bir yenilenen QR + PIN'i ve canlı
-/// Gelen / Gelmeyen / İzinli listesini görür.
+/// 2.2 CANLI YOKLAMA EKRANI (Kural 1: Dinamik QR & 4 Haneli PIN Kodu).
+/// 
+/// - Öğrenci Görünümü: Eğitmenin tahtaya/ekrana yansıttığı 4 haneli PIN kodunu
+///   veya QR kodunu girerek derse katılım bildirir. Kod 60 saniyede bir otomatik
+///   yenilenir; süresi dolan kodla yoklama verilmesi engellenir.
+/// - Eğitmen Görünümü: Dersi seçip "Yoklamayı Başlat" dediğinde 60 saniyede bir
+///   yenilenen dinamik QR ve 4 haneli PIN kodunu ([DynamicQrPinBoard]) görüntüler.
+///   Aynı zamanda derse katılan öğrencileri canlı olarak Gelen, Gelmeyen ve İzinli
+///   sekmelerinde anlık sayılarla ([LiveAttendanceRosterTabs]) takip eder ve manuel düzenleyebilir.
 class LiveAttendancePage extends StatelessWidget {
   const LiveAttendancePage({super.key});
 
@@ -29,11 +35,14 @@ class LiveAttendancePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final sl = GetIt.instance;
     final role = context.currentRole;
+
+    // Canlı yoklama işlemlerini yürüten LiveAttendanceCubit inject edilir
     return BlocProvider<LiveAttendanceCubit>(
       create: (_) => sl<LiveAttendanceCubit>(),
       child: RoleVisibilityGuard(
         currentRole: role,
         studentBuilder: (_) => const _StudentAttendanceView(),
+        // Eğitmen ekranı için ders listesini çekecek ScheduleCubit sağlanır
         instructorBuilder: (_) => BlocProvider<ScheduleCubit>(
           create: (_) => sl<ScheduleCubit>()..start(),
           child: const _InstructorAttendanceView(),
@@ -44,20 +53,24 @@ class LiveAttendancePage extends StatelessWidget {
 }
 
 // =========================================================================
-// Öğrenci
+// Öğrenci Görünümü
 // =========================================================================
 
+/// Öğrencinin PIN veya QR okutarak derse katıldığı arayüz.
 class _StudentAttendanceView extends StatelessWidget {
   const _StudentAttendanceView();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return BlocBuilder<LiveAttendanceCubit, LiveAttendanceState>(
       builder: (context, state) {
+        // Yoklama başarıyla alındıysa yeşil onay ekranı gösterilir
         if (state.status == LiveAttendanceStatus.submitted) {
           return _SuccessView(onAgain: context.read<LiveAttendanceCubit>().resetStudent);
         }
+
         return SingleChildScrollView(
           padding: AppDimensions.paddingAll16,
           child: Column(
@@ -65,12 +78,15 @@ class _StudentAttendanceView extends StatelessWidget {
             children: [
               Text('Derse Katıl', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: AppDimensions.p4),
+              // Kural 1 uyarısı ve 60 saniyelik zaman aşımı açıklaması
               Text(
                 'Eğitmenin ekranındaki 4 haneli PIN kodunu gir. Kod 60 saniye geçerlidir; '
                 'süresi dolan kodla yoklama verilemez.',
                 style: theme.textTheme.bodyMedium,
               ),
               const SizedBox(height: AppDimensions.p16),
+
+              // PIN giriş kutuları ve alternatif QR kod okuma butonu
               StudentQrPinScanner(
                 onSubmitPin: (pin) => _submit(context, pin),
                 onOpenQrScanner: () => _openQrScannerDialog(context),
@@ -83,6 +99,7 @@ class _StudentAttendanceView extends StatelessWidget {
     );
   }
 
+  /// Kamera olmadan da test edilebilmesi için açılan QR/Token giriş simülasyon diyaloğu.
   static Future<void> _openQrScannerDialog(BuildContext context) async {
     final controller = TextEditingController();
     final qrCode = await showDialog<String>(
@@ -110,6 +127,7 @@ class _StudentAttendanceView extends StatelessWidget {
       ),
     );
     controller.dispose();
+
     if (qrCode != null && qrCode.isNotEmpty && context.mounted) {
       try {
         await _submit(context, qrCode);
@@ -123,7 +141,7 @@ class _StudentAttendanceView extends StatelessWidget {
     }
   }
 
-  /// Widget hatayı kendi gösterir; bu yüzden başarısızlıkta istisna fırlatılır.
+  /// PIN kodunu backend'e doğrulama amacıyla gönderir; süre dolmuşsa hata fırlatır.
   static Future<void> _submit(BuildContext context, String pin) async {
     final user = context.readCurrentUser();
     if (user == null) throw Exception('Oturum bulunamadı.');
@@ -138,6 +156,7 @@ class _StudentAttendanceView extends StatelessWidget {
   }
 }
 
+/// Öğrenci kodu başarıyla doğruladığında gösterilen onay ekranı.
 class _SuccessView extends StatelessWidget {
   const _SuccessView({required this.onAgain});
 
@@ -166,9 +185,10 @@ class _SuccessView extends StatelessWidget {
 }
 
 // =========================================================================
-// Eğitmen
+// Eğitmen Görünümü
 // =========================================================================
 
+/// Eğitmenin yoklama oturumu başlattığı, QR/PIN tahtasını ve katılımcıları yönettiği ekran.
 class _InstructorAttendanceView extends StatefulWidget {
   const _InstructorAttendanceView();
 
@@ -177,8 +197,10 @@ class _InstructorAttendanceView extends StatefulWidget {
 }
 
 class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
+  // Seçili olan ders kimliği
   String? _courseId;
 
+  /// Ders listesindeki mükerrer kayıtları temizler.
   List<CourseScheduleEntity> _unique(List<CourseScheduleEntity> all) {
     final seen = <String>{};
     return [for (final c in all) if (seen.add(c.courseId)) c];
@@ -187,6 +209,7 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return BlocConsumer<LiveAttendanceCubit, LiveAttendanceState>(
       listenWhen: (p, c) => c.message != null && p.message != c.message,
       listener: (context, state) =>
@@ -199,7 +222,11 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
         return BlocBuilder<ScheduleCubit, ScheduleState>(
           builder: (context, schedule) {
             final courses = _unique(schedule.courses);
+
+            // Dersler yüklenirken bekleme durumu
             if (schedule.status.isLoading) return const LoadingStateView(message: 'Dersler yükleniyor...');
+
+            // Eğitmenin dersi yoksa boş durum uyarısı
             if (courses.isEmpty) {
               return const EmptyStateView(
                 title: 'Ders bulunamadı',
@@ -207,12 +234,14 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
                 icon: Icons.event_busy_rounded,
               );
             }
+
             final selectedId = _courseId ?? courses.first.courseId;
             final course = courses.firstWhere((c) => c.courseId == selectedId, orElse: () => courses.first);
 
             return ListView(
               padding: AppDimensions.paddingAll16,
               children: [
+                // 1. Durum: Yoklama henüz başlatılmamışsa ders seçimi ve Başlat butonu
                 if (!isActive) ...[
                   Text('Canlı Yoklama', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: AppDimensions.p12),
@@ -233,7 +262,9 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
                         : const Icon(Icons.qr_code_2_rounded),
                     label: const Text('Yoklamayı Başlat'),
                   ),
-                ] else if (session != null) ...[
+                ]
+                // 2. Durum: Yoklama aktifse canlı QR, 4 haneli PIN ve sayaç paneli
+                else if (session != null) ...[
                   DynamicQrPinBoard(
                     key: ValueKey<String>(session.sessionId),
                     pinCode: session.pinCode,
@@ -243,6 +274,8 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
                     courseLabel: '${course.courseCode} · ${course.courseName}',
                   ),
                   const SizedBox(height: AppDimensions.p12),
+
+                  // Canlı katılım sayaçları (Gelen / Gelmeyen / İzinli)
                   Row(
                     children: [
                       _Count(label: 'Gelen', value: live.countOf(AttendanceStatus.present), color: AppColors.resolvedGreen),
@@ -251,6 +284,8 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
                     ],
                   ),
                   const SizedBox(height: AppDimensions.p12),
+
+                  // Katılımcı öğrenci listesi ve manuel durum değiştirme sekmeleri
                   LiveAttendanceRosterTabs(
                     attendees: [
                       for (final entry in live.statuses.entries)
@@ -264,6 +299,8 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
                     onStatusChanged: (item, status) => cubit.changeStatus(item.studentUid, status),
                   ),
                   const SizedBox(height: AppDimensions.p16),
+
+                  // Yoklamayı Sonlandır Butonu
                   OutlinedButton.icon(
                     key: const Key('attendance_stop'),
                     onPressed: cubit.stopSession,
@@ -280,6 +317,7 @@ class _InstructorAttendanceViewState extends State<_InstructorAttendanceView> {
   }
 }
 
+/// Katılımcı sayılarını (Gelen, Gelmeyen, İzinli) renkli gösteren sayaç kutusu.
 class _Count extends StatelessWidget {
   const _Count({required this.label, required this.value, required this.color});
 

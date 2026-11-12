@@ -11,8 +11,15 @@ import '../cubit/auth_state.dart';
 import '../widgets/auth_text_field.dart';
 import '../widgets/role_selection_toggle.dart';
 
-/// KAYIT OL EKRANI: Öğrenci No, Ad-Soyad, E-posta, Şifre (2 kez) ve
-/// Öğrenci / Öğretmen Rol Belirleme Aşaması.
+/// KAYIT OL EKRANI (Register Page).
+/// 
+/// Yeni kullanıcıların (Öğrenci veya Eğitmen) sisteme kaydolmasını sağlayan ekrandır.
+/// Gerekli veriler:
+/// - Öğrenci No / Sicil No
+/// - Ad Soyad
+/// - E-posta adresi
+/// - Şifre ve Şifre Tekrarı (çift kontrol)
+/// - Rol Seçimi (Öğrenci / Öğretmen geçiş düğmesi)
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
@@ -21,16 +28,22 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
+  // Form geçerliliğini doğrulamak için GlobalKey
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+
+  // Giriş alanları kontrolcüleri
   final TextEditingController _studentNoController = TextEditingController();
   final TextEditingController _fullNameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
+
+  // Varsayılan rol Öğrenci olarak başlar
   UserRole _role = UserRole.student;
 
   @override
   void dispose() {
+    // Sayfa kapandığında kontrolcüler bellekten temizlenir
     _studentNoController.dispose();
     _fullNameController.dispose();
     _emailController.dispose();
@@ -39,9 +52,15 @@ class _RegisterPageState extends State<RegisterPage> {
     super.dispose();
   }
 
+  /// Form alanlarını doğrular ve AuthCubit register fonksiyonunu çağırır.
   void _submit() {
+    // Klavyeyi kapat
     FocusScope.of(context).unfocus();
+
+    // Validasyon kontrolü başarısızsa işlem yapma
     if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    // Kayıt isteğini AuthCubit'e ilet
     context.read<AuthCubit>().register(
           studentNo: _studentNoController.text,
           fullName: _fullNameController.text,
@@ -55,10 +74,12 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Kayıt Ol')),
       body: SafeArea(
         child: BlocConsumer<AuthCubit, AuthState>(
+          // Hata mesajı geldiğinde kullanıcıya SnackBar ile gösterir
           listener: (context, state) {
             if (state is AuthError) {
               ScaffoldMessenger.of(context)
@@ -68,6 +89,7 @@ class _RegisterPageState extends State<RegisterPage> {
           },
           builder: (context, state) {
             final isLoading = state is AuthLoading;
+
             return SingleChildScrollView(
               padding: AppDimensions.paddingAll24,
               child: Center(
@@ -78,8 +100,11 @@ class _RegisterPageState extends State<RegisterPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // Sayfa Başlığı
                         Text('EduPulse hesabını oluştur', style: theme.textTheme.titleLarge),
                         const SizedBox(height: AppDimensions.p20),
+
+                        // Öğrenci / Sicil Numarası
                         AuthTextField(
                           key: const Key('register_student_no'),
                           controller: _studentNoController,
@@ -92,6 +117,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           enabled: !isLoading,
                         ),
                         const SizedBox(height: AppDimensions.p12),
+
+                        // Ad Soyad Alanı
                         AuthTextField(
                           key: const Key('register_full_name'),
                           controller: _fullNameController,
@@ -103,6 +130,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           enabled: !isLoading,
                         ),
                         const SizedBox(height: AppDimensions.p12),
+
+                        // E-posta Adresi Alanı
                         AuthTextField(
                           key: const Key('register_email'),
                           controller: _emailController,
@@ -115,6 +144,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           enabled: !isLoading,
                         ),
                         const SizedBox(height: AppDimensions.p12),
+
+                        // Şifre Alanı
                         AuthTextField(
                           key: const Key('register_password'),
                           controller: _passwordController,
@@ -126,6 +157,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           enabled: !isLoading,
                         ),
                         const SizedBox(height: AppDimensions.p12),
+
+                        // Şifre Tekrar Alanı (Şifrelerin eşleştiğini doğrular)
                         AuthTextField(
                           key: const Key('register_confirm'),
                           controller: _confirmController,
@@ -137,6 +170,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           enabled: !isLoading,
                         ),
                         const SizedBox(height: AppDimensions.p24),
+
+                        // Rol Belirleme Düğmesi (Öğrenci / Öğretmen)
                         Text('Rol Belirleme', style: theme.textTheme.titleMedium),
                         const SizedBox(height: AppDimensions.p8),
                         RoleSelectionToggle(
@@ -144,6 +179,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           onRoleChanged: (role) => setState(() => _role = role),
                         ),
                         const SizedBox(height: AppDimensions.p24),
+
+                        // Kayıt Ol Gönderim Butonu
                         FilledButton(
                           key: const Key('register_submit'),
                           onPressed: isLoading ? null : _submit,
@@ -153,6 +190,8 @@ class _RegisterPageState extends State<RegisterPage> {
                               : const Text('Kayıt Ol'),
                         ),
                         const SizedBox(height: AppDimensions.p8),
+
+                        // Giriş Yap Ekranına Geri Dönüş
                         TextButton(
                           onPressed: isLoading ? null : () => Navigator.maybePop(context),
                           child: const Text('Zaten hesabım var — Giriş Yap'),

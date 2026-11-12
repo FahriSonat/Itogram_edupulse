@@ -22,14 +22,19 @@ import '../widgets/ask_question_modal.dart';
 import '../widgets/forum_question_card.dart';
 import 'forum_question_detail_page.dart';
 
-/// 2.6 FORUM: ders/konu etiketli soru akışı ve fotoğraflı "Soru Sor".
-/// Eğitmen üstte hızlı "Anlık Kriz Yayını" erişimini görür.
+/// 2.6 FORUM EKRANI (Ders ve Konu Etiketli Soru-Cevap Akışı).
+/// 
+/// - Öğrenci ve eğitmenlerin derslerle ilgili soru sorup yanıtlayabildiği topluluk alanıdır.
+/// - Sorular ders etiketi (Course Tag) ve konu etiketi (Topic Tag) ile filtrelenebilir.
+/// - Kullanıcılar soruya kamera veya galeriden fotoğraf ekleyebilir ([AskQuestionModal]).
+/// - Eğitmenler için üst panelde doğrudan acil bildirim gönderebilecekleri "Anlık Kriz Yayını" kısayolu bulunur.
 class ForumPage extends StatelessWidget {
   const ForumPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final sl = GetIt.instance;
+    // Forum sorularını ve ders filtre etiketlerini sağlayan Cubit'ler
     return MultiBlocProvider(
       providers: [
         BlocProvider<ForumCubit>(create: (_) => sl<ForumCubit>()..start()),
@@ -40,10 +45,11 @@ class ForumPage extends StatelessWidget {
   }
 }
 
+/// Forum ana görünümü: Ders filtre çipleri, soru listesi ve Soru Sor FAB butonu.
 class _ForumView extends StatelessWidget {
   const _ForumView();
 
-  /// Ders etiketleri program kodlarından gelir (filtreleme sonrası kaybolmaz).
+  /// Ders programından ders kodlarını (örn: CS101, MOB201) benzersiz ve sıralı olarak çeker.
   List<String> _courseTags(BuildContext context) {
     final tags = context.watch<ScheduleCubit>().state.courses.map((c) => c.courseCode).toSet().toList()..sort();
     return tags;
@@ -53,8 +59,10 @@ class _ForumView extends StatelessWidget {
   Widget build(BuildContext context) {
     final role = context.currentRole;
     final tags = _courseTags(context);
+
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // Yeni soru sorma modalını açan yüzen aksiyon butonu
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('forum_ask'),
         onPressed: () => _openAsk(context, tags),
@@ -67,9 +75,11 @@ class _ForumView extends StatelessWidget {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.actionMessage!))),
         builder: (context, state) {
           final cubit = context.read<ForumCubit>();
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Yalnızca eğitmenlerin gördüğü hızlı anlık kriz yayını butonu
               RoleVisibilityGuard.onlyInstructor(
                 currentRole: role,
                 child: Padding(
@@ -82,6 +92,8 @@ class _ForumView extends StatelessWidget {
                   ),
                 ),
               ),
+
+              // Yatay kaydırılabilir ders etiketi filtreleri (Tümü, CS101, MOB201 vb.)
               SizedBox(
                 height: 56,
                 child: ListView(
@@ -104,6 +116,8 @@ class _ForumView extends StatelessWidget {
                   ],
                 ),
               ),
+
+              // Soruların dinamik listelendiği alan
               Expanded(child: _list(context, state)),
             ],
           );
@@ -112,6 +126,7 @@ class _ForumView extends StatelessWidget {
     );
   }
 
+  /// Soruları durumlarına göre (yükleniyor, hata, boş veya liste) oluşturan yardımcı metot.
   Widget _list(BuildContext context, ForumState state) {
     final cubit = context.read<ForumCubit>();
     if (state.status.isLoading) return const LoadingStateView(message: 'Sorular yükleniyor...');
@@ -123,6 +138,7 @@ class _ForumView extends StatelessWidget {
         icon: Icons.forum_outlined,
       );
     }
+
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(AppDimensions.p16, AppDimensions.p8, AppDimensions.p16, 96),
       itemCount: state.questions.length,
@@ -130,6 +146,7 @@ class _ForumView extends StatelessWidget {
       itemBuilder: (context, i) {
         final q = state.questions[i];
         final hasImage = (q.imageUrl ?? '').isNotEmpty;
+
         return ForumQuestionCard(
           key: ValueKey<String>('question_${q.questionId}'),
           authorName: q.authorName,
@@ -149,10 +166,12 @@ class _ForumView extends StatelessWidget {
     );
   }
 
+  /// Yeni soru sorma modal formunu açar (kamera/galeri fotoğraf desteğiyle).
   static Future<void> _openAsk(BuildContext context, List<String> tags) {
     final cubit = context.read<ForumCubit>();
     final user = context.readCurrentUser();
     final picker = GetIt.instance<FilePickerService>();
+
     return AskQuestionModal.show(
       context,
       courseTags: tags.isEmpty ? const ['Genel'] : tags,
@@ -178,7 +197,7 @@ class _ForumView extends StatelessWidget {
     );
   }
 
-  /// Eğitmenin forumdan hızlı kriz yayını: Ana Sayfa ile aynı AnnouncementCubit akışı.
+  /// Eğitmenin forum üzerinden tek tıkla acil kriz yayını (FCM Push) gönderebildiği modalı açar.
   static Future<void> _openCrisis(BuildContext context) async {
     final courses = context.read<ScheduleCubit>().state.courses;
     final targets = <String, String>{

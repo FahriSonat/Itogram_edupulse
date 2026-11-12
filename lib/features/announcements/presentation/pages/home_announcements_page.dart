@@ -21,14 +21,18 @@ import '../widgets/create_announcement_sheet.dart';
 import '../widgets/crisis_broadcast_bottom_sheet.dart';
 import '../widgets/interactive_event_calendar.dart';
 
-/// ANA SAYFA: üstte interaktif etkinlik takvimi, altta filtrelenmiş duyurular.
-/// Yalnızca eğitmen "Duyuru / Anlık Kriz Yayını Gönder" butonunu görür (Kural 5).
+/// ANA SAYFA: İnteraktif etkinlik takvimi, filtrelenmiş duyurular ve anlık kriz yayını.
+/// 
+/// - Üst alanda takvim widget'ı ([InteractiveEventCalendar]) yer alır; gün seçilerek duyurular filtrelenebilir.
+/// - Kategori filtre çipleri ([_Filters]) ile duyuru türüne göre (Genel, Sınav, Ödev, Etkinlik, Acil) süzme yapılır.
+/// - Yalnızca eğitmen rolündeki kullanıcılar "Duyuru / Kriz Yayını" FAB butonunu görür (Kural 5: Rol kalkanı).
 class HomeAnnouncementsPage extends StatelessWidget {
   const HomeAnnouncementsPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final sl = GetIt.instance;
+    // Duyuru ve ders programı verilerini sağlayan Cubit'leri inject ediyoruz
     return MultiBlocProvider(
       providers: [
         BlocProvider<AnnouncementCubit>(create: (_) => sl<AnnouncementCubit>()..startWatchingAnnouncements()),
@@ -39,6 +43,7 @@ class HomeAnnouncementsPage extends StatelessWidget {
   }
 }
 
+/// Ana sayfa gövdesi: Eğitmen aksiyonları, Cubit durum dinleyicisi ve durum görünümleri.
 class _HomeView extends StatelessWidget {
   const _HomeView();
 
@@ -47,8 +52,10 @@ class _HomeView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final role = context.currentRole;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // Yalnızca eğitmenlerin duyuru ve kriz yayını göndermesine izin veren güvenlik widget'ı
       floatingActionButton: RoleVisibilityGuard.onlyInstructor(
         currentRole: role,
         child: FloatingActionButton.extended(
@@ -59,6 +66,7 @@ class _HomeView extends StatelessWidget {
         ),
       ),
       body: BlocConsumer<AnnouncementCubit, AnnouncementState>(
+        // Kriz bildirimi ve hata mesajlarını kullanıcıya SnackBar olarak iletme
         listener: (context, state) {
           final messenger = ScaffoldMessenger.of(context);
           if (state is CrisisPushSentSuccess) {
@@ -67,7 +75,7 @@ class _HomeView extends StatelessWidget {
             messenger.showSnackBar(SnackBar(content: Text(state.message)));
           }
         },
-        // Kriz yayını gönderilirken mevcut liste ekranda kalsın.
+        // Kriz yayını arkaplanda gönderilirken ekranın sıfırlanmasını önlemek için build filtresi
         buildWhen: (_, current) => current is! CrisisPushSending && current is! CrisisPushSentSuccess,
         builder: (context, state) {
           return switch (state) {
@@ -84,7 +92,7 @@ class _HomeView extends StatelessWidget {
     );
   }
 
-  /// Ders hedefleri: "Tüm Kampüs" + programdaki dersler.
+  /// Duyurunun hedef kitlesini oluşturur: "Tüm Kampüs" ve eğitmenin mevcut dersleri.
   static Map<String, String> _targets(BuildContext context) {
     final courses = context.read<ScheduleCubit>().state.courses;
     final seen = <String>{};
@@ -95,10 +103,13 @@ class _HomeView extends StatelessWidget {
     };
   }
 
+  /// Eğitmenin seçim yapacağı alt seçenek menüsünü açar (Standart duyuru veya Acil Kriz Push Bildirimi).
   static Future<void> _openInstructorActions(BuildContext context) async {
     final cubit = context.read<AnnouncementCubit>();
     final author = context.readCurrentUser()?.fullName ?? 'Akademi Yönetimi';
     final targets = _targets(context);
+
+    // Seçim menüsü: Takvimli Duyuru mu yoksa Acil Kriz Yayını mı?
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -125,6 +136,7 @@ class _HomeView extends StatelessWidget {
     if (!context.mounted || choice == null) return;
 
     if (choice == 'announcement') {
+      // Normal takvimli duyuru oluşturma formunu aç
       await CreateAnnouncementSheet.show(
         context,
         targets: targets.values.toList(),
@@ -148,6 +160,7 @@ class _HomeView extends StatelessWidget {
         },
       );
     } else {
+      // Tek tuşla anlık kriz yayını (FCM Push) gönderme formunu aç
       await CrisisBroadcastBottomSheet.show(
         context,
         targets: targets,
@@ -167,6 +180,7 @@ class _HomeView extends StatelessWidget {
   }
 }
 
+/// Duyuruların başarıyla yüklendiği ana liste ve takvim görünümü.
 class _LoadedView extends StatelessWidget {
   const _LoadedView({required this.state});
 
@@ -175,9 +189,13 @@ class _LoadedView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<AnnouncementCubit>();
+
+    // Ders kodları eşlemesi (örn: CS101)
     final courseLabels = <String, String>{
       for (final c in context.watch<ScheduleCubit>().state.courses) c.courseId: c.courseCode,
     };
+
+    // Takvimde nokta ile işaretlenecek etkinlik tarihleri kümesi
     final eventDates = <DateTime>{
       for (final a in state.allAnnouncements)
         if (a.eventDate != null) DateTime(a.eventDate!.year, a.eventDate!.month, a.eventDate!.day),
@@ -185,9 +203,11 @@ class _LoadedView extends StatelessWidget {
     final list = state.filteredAnnouncements;
 
     return RefreshIndicator(
+      // Aşağı çekerek yenileme mekanizması
       onRefresh: () async => cubit.startWatchingAnnouncements(),
       child: CustomScrollView(
         slivers: [
+          // İnteraktif Etkinlik Takvimi
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(AppDimensions.p16, AppDimensions.p12, AppDimensions.p16, 0),
@@ -198,7 +218,11 @@ class _LoadedView extends StatelessWidget {
               ),
             ),
           ),
+
+          // Tür Filtre Çipleri (Genel, Sınav, Ödev, Etkinlik vb.)
           SliverToBoxAdapter(child: _Filters(state: state)),
+
+          // Bölüm Başlığı ve Filtre Sıfırlama Aksiyonu
           SliverToBoxAdapter(
             child: SectionHeader(
               title: state.selectedDate == null ? 'Kampüs Duyuruları' : 'Seçili Günün Duyuruları',
@@ -206,6 +230,8 @@ class _LoadedView extends StatelessWidget {
               onAction: () => cubit.filterByDate(null),
             ),
           ),
+
+          // Filtreye uygun duyuru yoksa gösterilen boş durum görünümü
           if (list.isEmpty)
             const SliverFillRemaining(
               hasScrollBody: false,
@@ -216,6 +242,7 @@ class _LoadedView extends StatelessWidget {
               ),
             )
           else
+            // Duyuru Kartları Listesi
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(AppDimensions.p16, 0, AppDimensions.p16, 96),
               sliver: SliverList.separated(
@@ -230,6 +257,7 @@ class _LoadedView extends StatelessWidget {
                     eventDate: a.eventDate ?? DateTime.now(),
                     authorName: a.authorName,
                     targetLabel: a.targetCourseId == null ? _HomeView.allCampusLabel : courseLabels[a.targetCourseId],
+                    // Takvime ekleme geri bildirimi
                     onAddToCalendar: a.type == AnnouncementType.urgent
                         ? null
                         : () {
@@ -249,6 +277,7 @@ class _LoadedView extends StatelessWidget {
   }
 }
 
+/// Duyuru türüne göre (Genel, Sınav, Ödev vb.) yatay kaydırılabilir filtre çipleri.
 class _Filters extends StatelessWidget {
   const _Filters({required this.state});
 
@@ -263,11 +292,13 @@ class _Filters extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: AppDimensions.paddingH16V8,
         children: [
+          // "Tümü" filtresi seçeneği
           ChoiceChip(
             label: const Text('Tümü'),
             selected: state.selectedType == null,
             onSelected: (_) => cubit.filterByType(null),
           ),
+          // Enum değerlerinden türetilen kategori filtreleri
           for (final type in AnnouncementType.values) ...[
             const SizedBox(width: AppDimensions.p8),
             ChoiceChip(

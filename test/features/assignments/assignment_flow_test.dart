@@ -165,6 +165,30 @@ void main() {
       expect(find.byKey(const Key('assignment_create')), findsNothing);
     });
 
+    testWidgets('öğrenci "Ödevi Yükle" diyince açılan teslim ekranı opak beyaz zeminle açılır', (tester) async {
+      // 1. Ödev kontrol sayfasını test ortamında başlatıyoruz.
+      await pumpPage(tester, const AssignmentControlPage(), backend: backend);
+
+      // 2. Ödev kartındaki "Ödevi Yükle" butonunun varlığını doğrulayıp tıklıyoruz.
+      expect(find.text('Ödevi Yükle'), findsOneWidget);
+      await tester.tap(find.text('Ödevi Yükle'));
+      await tester.pumpAndSettle();
+
+      // 3. Açılan teslim masası (modal bottom sheet) içeriğinin yüklendiğini kontrol ediyoruz.
+      expect(find.text('Dosya Seç ve Teslim Et'), findsOneWidget);
+      expect(find.text('Puanlama Rubriği'), findsOneWidget);
+
+      // 4. Modalın kök kapsayıcısının (Container) şeffaf değil, opak beyaz renkte açıldığını teyit ediyoruz.
+      final containers = tester.widgetList<Container>(
+        find.descendant(of: find.byType(BottomSheet), matching: find.byType(Container)),
+      );
+      final modalRootContainer = containers.firstWhere(
+        (c) => (c.decoration is BoxDecoration) && (c.decoration as BoxDecoration).borderRadius != null,
+      );
+      final decoration = modalRootContainer.decoration as BoxDecoration?;
+      expect(decoration?.color, Colors.white);
+    });
+
     testWidgets('eğitmen "Yeni Ödev & Rubrik Aç" butonunu görür', (tester) async {
       await pumpPage(tester, const AssignmentControlPage(), backend: backend, role: UserRole.instructor);
       expect(find.byKey(const Key('assignment_create')), findsOneWidget);

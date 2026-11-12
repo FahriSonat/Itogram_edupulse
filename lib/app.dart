@@ -6,6 +6,11 @@ import 'package:itogram_edupulse/features/auth/presentation/cubit/auth_cubit.dar
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+/// [EduPulseApp] uygulamanın kök widget'ıdır.
+/// 
+/// - [AuthCubit] ve [ThemeCubit] sağlayıcılarını uygulamanın en tepesine bağlar.
+/// - [MaterialApp.router] ile [AppRouter] yönlendirmesini entegre eder.
+/// - Açık ve koyu tema dinamik geçişlerini yönetir.
 class EduPulseApp extends StatelessWidget {
   const EduPulseApp({super.key});
 

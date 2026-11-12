@@ -21,9 +21,14 @@ import '../widgets/course_grade_detail_card.dart';
 import '../widgets/gpa_simulator_dashboard.dart';
 import '../widgets/instructor_grade_entry_modal.dart';
 
-/// 2.5 NOT BİLGİSİ: öğrenci 4.00'lük GPA simülatörünü ve ders bazlı
-/// Vize / Final / Bonus / Harf kartlarını görür; eğitmen ders ve kayıtlı
-/// öğrenci seçip not atar, düzenler veya siler (Kural 4).
+/// 2.5 NOT BİLGİSİ VE AKADEMİK BAŞARI EKRANI (Grade Info Page).
+/// 
+/// Kural 4: Dinamik Ağırlıklı Not Hesaplama & Harf Skalası:
+/// - Başarı Notu = Vize × 0.40 + Final × 0.60 + Bonus (Maksimum 100 puan).
+/// - Öğrenci Görünümü: 4.00'lük kümülatif GPA göstergesi, "Bu dersten şu harfi alırsam
+///   ortalamam ne olur?" interaktif GPA Simülatörü ve ders bazlı detay kartları.
+/// - Eğitmen Görünümü: Dersi ve sisteme kayıtlı öğrencileri seçerek Vize, Final, Bonus
+///   notu girme ([InstructorGradeEntryModal]), düzenleme ve silme panelleri.
 class GradeInfoPage extends StatelessWidget {
   const GradeInfoPage({super.key});
 
@@ -31,11 +36,14 @@ class GradeInfoPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final role = context.currentRole;
     final uid = context.currentUser?.uid ?? '';
+
+    // Kullanıcı rolüne göre öğrenci veya eğitmen not verilerini yükleyen Cubit
     return BlocProvider<GradesCubit>(
       create: (_) {
         final cubit = GetIt.instance<GradesCubit>();
         return role.isInstructor ? (cubit..loadForInstructor()) : (cubit..loadForStudent(uid));
       },
+      // Rol koruması ile öğrenci ve eğitmen arayüzlerini ayırır
       child: RoleVisibilityGuard(
         currentRole: role,
         studentBuilder: (_) => const _StudentGradesView(),
@@ -45,28 +53,36 @@ class GradeInfoPage extends StatelessWidget {
   }
 }
 
+/// Null sayısal değerler için sıfır döndüren yardımcı dönüştürücü.
 double _num(double? v) => v ?? 0;
 
+/// Dersin resmi harf notunu çözer; yoksa ortalamaya göre hesaplar.
 LetterGrade _letterOf(CourseGradeEntity g) =>
     g.letterGrade ?? GradeCalculator.getLetterGrade(_num(g.totalAverage));
 
 // =========================================================================
-// Öğrenci
+// Öğrenci Görünümü
 // =========================================================================
 
+/// Öğrencinin genel not ortalamasını gördüğü ve simüle ettiği arayüz.
 class _StudentGradesView extends StatelessWidget {
   const _StudentGradesView();
 
   @override
   Widget build(BuildContext context) {
     final uid = context.currentUser?.uid ?? '';
+
     return BlocBuilder<GradesCubit, GradesState>(
       builder: (context, state) {
         final cubit = context.read<GradesCubit>();
+
+        // Yüklenme ve hata durumları
         if (state.status.isLoading) return const LoadingStateView(message: 'Notlar yükleniyor...');
         if (state.status == ViewStatus.failure) {
           return ErrorStateView(message: state.errorMessage, onRetry: () => cubit.loadForStudent(uid));
         }
+
+        // Henüz not girilmemişse boş durum görünümü
         if (state.grades.isEmpty) {
           return const EmptyStateView(
             title: 'Henüz not girilmedi',
@@ -74,15 +90,19 @@ class _StudentGradesView extends StatelessWidget {
             icon: Icons.school_outlined,
           );
         }
+
         return ListView(
           padding: AppDimensions.paddingAll16,
           children: [
+            // 4.00 üzerinden Kümülatif GPA ve Simülatör Dashboard Paneli
             GpaSimulatorDashboard(
               cumulativeGpa: state.gpa,
               termGpa: state.simulatedGpa,
               totalCredits: state.totalCredits,
               onSimulateGpa: () => _openSimulator(context),
             ),
+
+            // Simülasyon aktifse simüle edilen değer ve sıfırlama butonu
             if (state.isSimulating) ...[
               const SizedBox(height: AppDimensions.p8),
               Row(
@@ -97,7 +117,10 @@ class _StudentGradesView extends StatelessWidget {
                 ],
               ),
             ],
+
             const SectionHeader(title: 'Ders Notlarım', padding: EdgeInsets.symmetric(vertical: 8)),
+
+            // Her ders için Vize, Final, Bonus ve Harf Notu Detay Kartı
             for (final g in state.grades) ...[
               CourseGradeDetailCard(
                 courseCode: state.courseCodeFor(g.courseId),
@@ -117,7 +140,7 @@ class _StudentGradesView extends StatelessWidget {
     );
   }
 
-  /// "Bu dersten şu harfi alırsam GPA'm ne olur?"
+  /// Öğrencinin ders harf notlarını değiştirerek GPA senaryolarını test ettiği alt modal.
   static Future<void> _openSimulator(BuildContext context) {
     final cubit = context.read<GradesCubit>();
     return showModalBottomSheet<void>(
@@ -137,6 +160,7 @@ class _StudentGradesView extends StatelessWidget {
                 Text('Simüle GPA: ${state.simulatedGpa.toStringAsFixed(2)} / 4.00',
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: AppDimensions.p12),
+                // Derslerin harf notlarını geçici olarak seçip simüle etme listesi
                 for (final g in state.grades)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -163,9 +187,10 @@ class _StudentGradesView extends StatelessWidget {
 }
 
 // =========================================================================
-// Eğitmen
+// Eğitmen Görünümü
 // =========================================================================
 
+/// Eğitmenin ders seçip öğrencilere not atadığı, düzenlediği veya sildiği arayüz.
 class _InstructorGradesView extends StatelessWidget {
   const _InstructorGradesView();
 
@@ -173,6 +198,7 @@ class _InstructorGradesView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // Seçili ders varsa "Not Gir" yüzen butonunu göster
       floatingActionButton: BlocBuilder<GradesCubit, GradesState>(
         buildWhen: (p, c) => p.selectedCourseId != c.selectedCourseId,
         builder: (context, state) => state.selectedCourse == null
@@ -190,6 +216,7 @@ class _InstructorGradesView extends StatelessWidget {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.actionMessage!))),
         builder: (context, state) {
           final cubit = context.read<GradesCubit>();
+
           if (state.status == ViewStatus.failure) {
             return ErrorStateView(message: state.errorMessage, onRetry: cubit.loadForInstructor);
           }
@@ -198,16 +225,22 @@ class _InstructorGradesView extends StatelessWidget {
                 ? const LoadingStateView(message: 'Dersler yükleniyor...')
                 : const EmptyStateView(title: 'Ders bulunamadı', message: 'Önce Ders Programı\'na ders ekleyin.');
           }
+
           return ListView(
             padding: const EdgeInsets.fromLTRB(AppDimensions.p16, AppDimensions.p16, AppDimensions.p16, 96),
             children: [
+              // Not girişi yapılacak dersin seçimi
               CourseDropdown(courses: state.courses, selectedCourseId: state.selectedCourseId, onChanged: cubit.selectCourse),
               const SizedBox(height: AppDimensions.p8),
+
+              // Kural 4 Formül Bilgilendirme Metni
               Text(
                 'Başarı Notu = Vize × 0.40 + Final × 0.60 + Bonus (en fazla 100)',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: AppDimensions.p12),
+
+              // Yüklenme, boş veya not listesi
               if (state.status.isLoading)
                 const Padding(padding: AppDimensions.paddingAll24, child: Center(child: CircularProgressIndicator()))
               else if (state.grades.isEmpty)
@@ -223,6 +256,7 @@ class _InstructorGradesView extends StatelessWidget {
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                   const SizedBox(height: AppDimensions.p4),
+                  // Eğitmen için düzenleme ve silme aksiyonları içeren not kartı
                   CourseGradeDetailCard(
                     key: ValueKey<String>('grade_${g.gradeId}'),
                     courseCode: state.courseCodeFor(g.courseId),
@@ -246,11 +280,13 @@ class _InstructorGradesView extends StatelessWidget {
     );
   }
 
+  /// Öğrenci seçip Vize / Final / Bonus notlarını girmeye yarayan modal formunu açar.
   static Future<void> _openEntry(BuildContext context, {CourseGradeEntity? existing}) {
     final cubit = context.read<GradesCubit>();
     final course = cubit.state.selectedCourse;
     if (course == null) return Future.value();
     final students = cubit.state.students;
+
     return InstructorGradeEntryModal.show(
       context,
       courseName: course.courseName,
@@ -283,6 +319,7 @@ class _InstructorGradesView extends StatelessWidget {
     );
   }
 
+  /// Öğrenci notunu silmeden önce onay isteyen diyalog penceresi.
   static Future<void> _confirmDelete(BuildContext context, CourseGradeEntity grade) async {
     final cubit = context.read<GradesCubit>();
     final ok = await showDialog<bool>(

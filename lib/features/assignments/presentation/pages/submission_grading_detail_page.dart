@@ -19,11 +19,18 @@ import '../cubit/assignment_state.dart';
 import '../widgets/audio_written_feedback_box.dart';
 import '../widgets/late_submission_warning_banner.dart';
 
-/// Yalnızca eğitmen: teslim edilen dosyayı inceleme, 100 üzerinden puanlama
-/// ve sesli / yazılı geribildirim. Gecikmiş teslimde -10 ceza otomatik düşer.
-///
-/// Router: `/assignments/grading/:submissionId?assignmentId=...`
-/// (RoleGuard bu yolu öğrenciye zaten kapatır; burada da ikinci kalkan var.)
+/// ÖDEV DEĞERLENDİRME & GERİ BİLDİRİM SAYFASI (Yalnızca Eğitmen).
+/// 
+/// Eğitmenin teslim edilen öğrenci dosyasını incelemesini, 100 üzerinden not vermesini,
+/// yazılı ve sesli geri bildirim kaydetmesini sağlayan ekrandır.
+/// 
+/// Kural 2 (Gecikmiş Teslim Cezası):
+/// - Eğer öğrenci ödevi son teslim tarihinden sonra yüklediyse sistemde `isLatePenaltyApplied`
+///   bayrağı aktiftir. Eğitmenin girdiği ham puandan (rawScore) otomatik olarak 10 ceza puanı
+///   düşülerek nihai puan (finalScore) önizlemede canlı olarak gösterilir ve kaydedilir.
+/// 
+/// Güvenlik:
+/// - [RoleVisibilityGuard.onlyInstructor] ile öğrenci erişimi UI seviyesinde engellenir.
 class SubmissionGradingDetailPage extends StatelessWidget {
   const SubmissionGradingDetailPage({super.key, required this.submissionId, required this.assignmentId});
 
@@ -32,6 +39,7 @@ class SubmissionGradingDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Öğrenci bu ekrana erişmeye çalışırsa Yetkisiz Erişim uyarısı gösterilir
     return RoleVisibilityGuard.onlyInstructor(
       currentRole: context.currentRole,
       fallback: const EmptyStateView(
@@ -39,6 +47,7 @@ class SubmissionGradingDetailPage extends StatelessWidget {
         message: 'Bu sayfa yalnızca eğitmenler içindir.',
         icon: Icons.lock_outline_rounded,
       ),
+      // İlgili ödevin verilerini çekmek için AssignmentCubit inject edilir
       child: BlocProvider<AssignmentCubit>(
         create: (_) => GetIt.instance<AssignmentCubit>()..openAssignment(assignmentId),
         child: _GradingView(submissionId: submissionId, assignmentId: assignmentId),
@@ -47,6 +56,7 @@ class SubmissionGradingDetailPage extends StatelessWidget {
   }
 }
 
+/// Değerlendirme ana görünümü: Teslim durum kontrolü ve hata/yükleniyor ekranları.
 class _GradingView extends StatelessWidget {
   const _GradingView({required this.submissionId, required this.assignmentId});
 
@@ -61,20 +71,29 @@ class _GradingView extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.actionMessage!))),
       builder: (context, state) {
         final cubit = context.read<AssignmentCubit>();
+
+        // Teslim verileri yüklenirken hata oluşursa gösterilen görünüm
         if (state.submissionsStatus == ViewStatus.failure) {
           return ErrorStateView(message: state.errorMessage, onRetry: () => cubit.openAssignment(assignmentId));
         }
+
+        // Veriler getirilirken yükleniyor durumu
         if (state.submissionsStatus.isLoading) return const LoadingStateView(message: 'Teslim yükleniyor...');
+
+        // Değerlendirilecek teslim ID eşleşmesi
         final submission = state.submissionById(submissionId);
         if (submission == null) {
           return const EmptyStateView(title: 'Teslim bulunamadı', icon: Icons.search_off_rounded);
         }
+
+        // Teslim bulunduysa notlandırma formunu aç
         return _GradingForm(submission: submission, assignmentId: assignmentId, state: state);
       },
     );
   }
 }
 
+/// Not, yazılı geribildirim ve ses kaydını içeren form bileşeni.
 class _GradingForm extends StatefulWidget {
   const _GradingForm({required this.submission, required this.assignmentId, required this.state});
 
@@ -88,8 +107,12 @@ class _GradingForm extends StatefulWidget {
 
 class _GradingFormState extends State<_GradingForm> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+
+  // Eğitmenin girdiği ham not (0-100) kontrolcüsü
   late final TextEditingController _scoreController =
       TextEditingController(text: widget.submission.rawScore?.toStringAsFixed(0) ?? '');
+
+  // Yazılı geri bildirim metni
   late String _feedback = widget.submission.writtenFeedback ?? '';
 
   @override
@@ -98,8 +121,10 @@ class _GradingFormState extends State<_GradingForm> {
     super.dispose();
   }
 
+  /// Metin kutusundan ondalıklı puanı parse eder.
   double? get _rawScore => double.tryParse(_scoreController.text.replaceAll(',', '.'));
 
+  /// Formu onaylar ve notu/ses kaydını kaydetmek üzere Cubit fonksiyonunu çağırır.
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final ok = await context.read<AssignmentCubit>().gradeSubmission(
@@ -118,6 +143,8 @@ class _GradingFormState extends State<_GradingForm> {
     final state = widget.state;
     final cubit = context.read<AssignmentCubit>();
     final raw = _rawScore;
+
+    // Kural 2: Ham puandan gecikme cezası (-10) düşülerek hesaplanan canlı önizleme
     final preview = raw == null ? null : GradeAndFeedbackUseCase.previewFinalScore(raw, isLate: s.isLatePenaltyApplied);
 
     return Form(
@@ -125,6 +152,7 @@ class _GradingFormState extends State<_GradingForm> {
       child: ListView(
         padding: AppDimensions.paddingAll16,
         children: [
+          // Sayfa Üst Barı ve Geri Butonu
           Row(
             children: [
               if (Navigator.canPop(context))
@@ -139,6 +167,8 @@ class _GradingFormState extends State<_GradingForm> {
             ],
           ),
           const SizedBox(height: AppDimensions.p12),
+
+          // Öğrenci Bilgi Kartı
           Card(
             child: ListTile(
               leading: const Icon(Icons.person_rounded),
@@ -146,6 +176,8 @@ class _GradingFormState extends State<_GradingForm> {
               subtitle: Text('Teslim: ${_fmt(s.submittedAt)} · ${s.status.name}'),
             ),
           ),
+
+          // Teslim Edilen Dosya Kartı (URL panoya kopyalanabilir)
           Card(
             child: ListTile(
               leading: const Icon(Icons.attach_file_rounded),
@@ -163,11 +195,15 @@ class _GradingFormState extends State<_GradingForm> {
               ),
             ),
           ),
+
+          // Gecikmiş teslim ise -10 ceza puanı uyarı bandı
           if (s.isLatePenaltyApplied) ...[
             const SizedBox(height: AppDimensions.p8),
             const LateSubmissionWarningBanner(),
           ],
           const SizedBox(height: AppDimensions.p16),
+
+          // Puan Giriş Alanı (0-100 arası kısıtlı ve formatlı)
           TextFormField(
             key: const Key('grading_score'),
             controller: _scoreController,
@@ -180,6 +216,8 @@ class _GradingFormState extends State<_GradingForm> {
               prefixIcon: Icon(Icons.grade_rounded),
             ),
           ),
+
+          // Cezalı / Cezasız nihai puan canlı önizleme metni
           if (preview != null) ...[
             const SizedBox(height: AppDimensions.p8),
             Text(
@@ -191,6 +229,8 @@ class _GradingFormState extends State<_GradingForm> {
             ),
           ],
           const SizedBox(height: AppDimensions.p16),
+
+          // Sesli ve Yazılı Geri Bildirim Kutusu (Ses kaydı başlatma / dinleme)
           AudioWrittenFeedbackBox(
             isInstructor: true,
             writtenFeedback: _feedback,
@@ -205,6 +245,8 @@ class _GradingFormState extends State<_GradingForm> {
                 : null,
           ),
           const SizedBox(height: AppDimensions.p24),
+
+          // Puanı ve Geri Bildirimleri Kaydet Butonu
           FilledButton.icon(
             key: const Key('grading_save'),
             onPressed: state.isGrading ? null : _save,
@@ -219,6 +261,7 @@ class _GradingFormState extends State<_GradingForm> {
     );
   }
 
+  /// Tarih ve saat formatlayıcı yardımcı fonksiyon.
   static String _fmt(DateTime d) {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(d.day)}.${two(d.month)}.${d.year} ${two(d.hour)}:${two(d.minute)}';
