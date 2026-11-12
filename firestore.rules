@@ -1,0 +1,187 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Helper Functions - Kritik İş Kuralı 5 (Mutlak Güvenlik)
+    // =========================================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function userExists() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Kritik İş Kuralı 5: users/{uid} dökümanındaki role == 'instructor' kontrolü
+    function isInstructor() {
+      return userExists() && getUserData().role == 'instructor';
+    }
+
+    function isStudent() {
+      return userExists() && getUserData().role == 'student';
+    }
+
+    // =========================================================================
+    // 1. Users Collection (/users/{userId})
+    // =========================================================================
+    match /users/{userId} {
+      // Öğrenci numarası (studentOrStaffNo) -> e-posta çözümlemesi ve profil okuma
+      allow read: if true;
+
+      // Kayıt aşamasında kullanıcı kendi dökümanını oluşturabilir
+      allow create: if isOwner(userId) &&
+        (request.resource.data.role == 'student' || request.resource.data.role == 'instructor');
+
+      // Kritik İş Kuralı 5: Kullanıcı kendi profilini güncelleyebilir ancak
+      // kendi rolünü (role) ASLA değiştiremez (role == 'instructor' yapamaz)!
+      allow update: if isOwner(userId) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])) &&
+        request.resource.data.role == resource.data.role;
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // 2. Announcements Collection (/announcements/{announcementId})
+    // Kritik İş Kuralı 5: Sadece role == 'instructor' yazabilir/güncelleyebilir/silebilir
+    // =========================================================================
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isInstructor();
+    }
+
+    // =========================================================================
+    // 3. Courses Collection (/courses/{courseId})
+    // Kritik İş Kuralı 5: Sadece role == 'instructor' yazabilir/güncelleyebilir/silebilir
+    // =========================================================================
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isInstructor();
+
+      // 3a. Attendance Sessions (/courses/{courseId}/attendance_sessions/{sessionId})
+      // Yoklama oturumu oluşturma/silme sadece eğitmene aittir.
+      // Öğrenciler yalnızca oturum aktif ve süresi geçerli ise (request.time <= resource.data.expiresAt)
+      // studentStatusMap alanına kendi katılımlarını ekleyebilir.
+      match /attendance_sessions/{sessionId} {
+        allow read: if isAuthenticated();
+        allow create, delete: if isInstructor();
+        allow update: if isInstructor() || (
+          isStudent() &&
+          resource.data.isActive == true &&
+          request.time <= resource.data.expiresAt &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'studentStatusMap',
+            'presentStudentIds',
+            'attendees'
+          ])
+        );
+      }
+
+      // 3b. Attendance Records (/courses/{courseId}/attendance_records/{recordId})
+      // Eğitmen tüm kayıtları yönetebilir; öğrenci sadece başlangıç kaydını (absentHours == 0)
+      // oluşturabilir, kendi devamsızlık saatini sıfırlayamaz/azaltamaz.
+      match /attendance_records/{recordId} {
+        allow read: if isAuthenticated();
+        allow create: if isInstructor() || (
+          isStudent() &&
+          recordId == request.auth.uid &&
+          request.resource.data.absentHours == 0
+        );
+        allow update: if isInstructor() || (
+          isStudent() &&
+          recordId == request.auth.uid &&
+          request.resource.data.absentHours == resource.data.absentHours
+        );
+        allow delete: if isInstructor();
+      }
+
+      // 3c. Grades (/courses/{courseId}/grades/{gradeId})
+      // Kritik İş Kuralı 5: Sadece role == 'instructor' not yazabilir/güncelleyebilir/silebilir.
+      // Öğrenci uid'siyle yazma kesinlikle reddedilir.
+      match /grades/{gradeId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isInstructor();
+      }
+    }
+
+    // 3d. Collection Group Query for Grades (/{path=**}/grades/{gradeId})
+    match /{path=**}/grades/{gradeId} {
+      allow read: if isAuthenticated();
+    }
+
+    // =========================================================================
+    // 4. Assignments Collection (/assignments/{assignmentId})
+    // =========================================================================
+    match /assignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isInstructor();
+
+      // 4a. Submissions (/assignments/{assignmentId}/submissions/{submissionId})
+      // Öğrenciler yalnızca kendi ödev teslimlerini (submissions) yazabilir;
+      // rawScore, finalScore, writtenFeedback, audioFeedbackUrl alanlarını değiştiremez.
+      match /submissions/{submissionId} {
+        allow read: if isAuthenticated();
+        allow create: if isStudent() &&
+          (submissionId == request.auth.uid || request.resource.data.studentUid == request.auth.uid) &&
+          request.resource.data.studentUid == request.auth.uid &&
+          request.resource.data.rawScore == null &&
+          request.resource.data.finalScore == null;
+        allow update: if isInstructor() || (
+          isStudent() &&
+          (submissionId == request.auth.uid || resource.data.studentUid == request.auth.uid) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'rawScore',
+            'finalScore',
+            'isLatePenaltyApplied',
+            'writtenFeedback',
+            'audioFeedbackUrl'
+          ]))
+        );
+        allow delete: if isInstructor();
+      }
+    }
+
+    // =========================================================================
+    // 5. Forum Questions Collection (/forum_questions/{questionId})
+    // Öğrenciler başkalarının forum sorusunu isResolved: true YAPAMAZ.
+    // =========================================================================
+    match /forum_questions/{questionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        request.resource.data.authorUid == request.auth.uid;
+
+      // Sadece eğitmen veya sorunun kendi sahibi (authorUid == request.auth.uid)
+      // soruyu güncelleyebilir; başka bir öğrenci isResolved: true yapamaz.
+      allow update: if isInstructor() || (
+        isAuthenticated() && resource.data.authorUid == request.auth.uid
+      );
+
+      allow delete: if isInstructor() || (
+        isAuthenticated() && resource.data.authorUid == request.auth.uid
+      );
+
+      // 5a. Forum Answers (/forum_questions/{questionId}/answers/{answerId})
+      match /answers/{answerId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() &&
+          request.resource.data.isInstructorApproved == false;
+
+        // Yanıtı çözüldü / eğitmen onaylı (isInstructorApproved: true) olarak
+        // işaretlemek yalnızca eğitmene aittir.
+        allow update: if isInstructor();
+        allow delete: if isInstructor();
+      }
+    }
+  }
+}

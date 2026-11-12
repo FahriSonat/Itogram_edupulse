@@ -1,0 +1,20 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+/// Bir [Stream]'i (ör. `AuthCubit.stream`) GoRouter'ın `refreshListenable`
+/// parametresine bağlar: her yeni olayda `redirect` (RoleGuard) yeniden çalışır.
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    // asBroadcastStream kullanılmaz: dispose'da kaynak akışın aboneliği de kapanmalı.
+    _subscription = stream.listen((dynamic _) => notifyListeners());
+  }
+
+  late final StreamSubscription<dynamic> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
+}
