@@ -1,4 +1,3 @@
-
 import 'package:itogram_edupulse/app.dart';
 import 'package:itogram_edupulse/core/config/firebase_options.dart';
 import 'package:itogram_edupulse/core/config/flavor_config.dart';
@@ -9,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
   // 1) Binding
@@ -17,16 +17,31 @@ Future<void> main() async {
   // 2) Ortam (dev / prod):  flutter run --dart-define=FLAVOR=prod
   FlavorConfig.initialize(FlavorConfig.fromEnvironment());
 
-  // 3) Firebase
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // 3) DotEnv (.env) Dosyasını Yükleme <-- 2. İşlem eklendi (Firebase'den önce olmalı)
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    FlavorConfig.log('dotenv load warning: $e');
+  }
 
-  // 4) Crashlytics: Flutter + platform hataları
+  // 4) Firebase
+  if (Firebase.apps.isEmpty) {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } on FirebaseException catch (e) {
+      if (e.code != 'duplicate-app') rethrow;
+    }
+  }
+
+  // 5) Crashlytics: Flutter + platform hataları
   await _setupCrashlytics();
 
-  // 5) Dependency Injection
+  // 6) Dependency Injection
   await initDependencies();
 
-  // 6) Analytics + FCM + yerel bildirim kurulumu
+  // 7) Analytics + FCM + yerel bildirim kurulumu
   try {
     await sl<AnalyticsService>().initialize();
   } catch (e) {
@@ -38,7 +53,7 @@ Future<void> main() async {
     FlavorConfig.log('FcmNotificationService init warning: $e');
   }
 
-  // 7) Uygulama
+  // 8) Uygulama
   runApp(const EduPulseApp());
 }
 

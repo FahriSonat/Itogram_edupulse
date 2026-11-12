@@ -4,43 +4,5 @@
   },
   "storage": {
     "rules": "storage.rules"
-  },
-  "flutter": {
-    "platforms": {
-      "android": {
-        "default": {
-          "projectId": "edupulse-e5a4d",
-          "appId": "1:993809855286:android:b324e76e0f16b932a73997",
-          "fileOutput": "android/app/google-services.json"
-        }
-      },
-      "ios": {
-        "default": {
-          "projectId": "edupulse-e5a4d",
-          "appId": "1:993809855286:ios:55886036a1b79507a73997",
-          "uploadDebugSymbols": true,
-          "fileOutput": "ios/Runner/GoogleService-Info.plist"
-        }
-      },
-      "macos": {
-        "default": {
-          "projectId": "edupulse-e5a4d",
-          "appId": "1:993809855286:ios:55886036a1b79507a73997",
-          "uploadDebugSymbols": true,
-          "fileOutput": "macos/Runner/GoogleService-Info.plist"
-        }
-      },
-      "dart": {
-        "lib/core/config/firebase_options.dart": {
-          "projectId": "edupulse-e5a4d",
-          "configurations": {
-            "android": "1:993809855286:android:b324e76e0f16b932a73997",
-            "ios": "1:993809855286:ios:55886036a1b79507a73997",
-            "macos": "1:993809855286:ios:55886036a1b79507a73997",
-            "web": "1:993809855286:web:67dc2b3f08196303a73997"
-          }
-        }
-      }
-    }
   }
 }

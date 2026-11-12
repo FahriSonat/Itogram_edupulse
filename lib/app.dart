@@ -1,4 +1,3 @@
-import 'package:itogram_edupulse/core/config/flavor_config.dart';
 import 'package:itogram_edupulse/core/di/injection_container.dart';
 import 'package:itogram_edupulse/core/router/app_router.dart';
 import 'package:itogram_edupulse/core/theme/app_theme.dart';
@@ -22,7 +21,7 @@ class EduPulseApp extends StatelessWidget {
         builder: (BuildContext context, ThemeMode themeMode) {
           return MaterialApp.router(
             title: 'EduPulse',
-            debugShowCheckedModeBanner: FlavorConfig.showBanner,
+            debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeMode,

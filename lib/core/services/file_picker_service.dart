@@ -73,27 +73,43 @@ class FilePickerService {
     double? maxWidth = 1920,
     double? maxHeight = 1920,
   }) async {
-    final XFile? xFile = await _imagePicker.pickImage(
-      source: source,
-      imageQuality: imageQuality,
-      maxWidth: maxWidth,
-      maxHeight: maxHeight,
-    );
+    try {
+      final XFile? xFile = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: imageQuality,
+        maxWidth: maxWidth,
+        maxHeight: maxHeight,
+      );
 
-    if (xFile == null) return null;
+      if (xFile == null) return null;
 
-    final bytes = await xFile.readAsBytes();
-    final extension = xFile.name.contains('.')
-        ? xFile.name.split('.').last.toLowerCase()
-        : 'jpg';
+      final bytes = await xFile.readAsBytes();
+      final extension = xFile.name.contains('.')
+          ? xFile.name.split('.').last.toLowerCase()
+          : 'jpg';
 
-    return PickedFileAttachment(
-      name: xFile.name,
-      path: xFile.path,
-      bytes: bytes,
-      sizeInBytes: bytes.length,
-      extension: extension,
-    );
+      return PickedFileAttachment(
+        name: xFile.name,
+        path: xFile.path,
+        bytes: bytes,
+        sizeInBytes: bytes.length,
+        extension: extension,
+      );
+    } catch (_) {
+      final platformFile = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'heic'],
+      );
+      if (platformFile == null) return null;
+      final bytes = await platformFile.readAsBytes();
+      return PickedFileAttachment(
+        name: platformFile.name,
+        path: platformFile.path,
+        bytes: bytes,
+        sizeInBytes: bytes.length,
+        extension: platformFile.extension ?? 'jpg',
+      );
+    }
   }
 
   /// Sesli geri bildirim için ses dosyası seçimi

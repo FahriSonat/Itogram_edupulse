@@ -3,7 +3,9 @@
 // FlutterFire CLI, proje kimliklerini içeren eksiksiz dosyayı otomatik üretir.
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final class DefaultFirebaseOptions {
   const DefaultFirebaseOptions._();
@@ -25,39 +27,39 @@ final class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyB6Yca2-0WJSsI3plmqJcMci9I8lIvsGI8',
-    appId: '1:993809855286:web:67dc2b3f08196303a73997',
-    messagingSenderId: '993809855286',
-    projectId: 'edupulse-e5a4d',
-    authDomain: 'edupulse-e5a4d.firebaseapp.com',
-    storageBucket: 'edupulse-e5a4d.firebasestorage.app',
-    measurementId: 'G-0JTLRCF3C8',
+  static FirebaseOptions get web => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_WEB'] ?? '',
+    appId: dotenv.env['FIREBASE_APP_ID_WEB'] ?? '',
+    messagingSenderId: dotenv.env['FIREBASE_MESSAGING_SENDER_ID_WEB'] ?? '',
+    projectId: dotenv.env['FIREBASE_PROJECT_ID_WEB'] ?? '',
+    authDomain: dotenv.env['FIREBASE_AUTH_DOMAIN_WEB'] ?? '',
+    storageBucket: dotenv.env['FIREBASE_STORAGE_BUCKET_WEB'] ?? '',
+    measurementId: dotenv.env['FIREBASE_MEASUREMENT_ID_WEB'] ?? '',
   );
 
-  static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyD3Rvj7qSxkz_RJulkbC-pqMyie2swSiTQ',
-    appId: '1:993809855286:ios:55886036a1b79507a73997',
-    messagingSenderId: '993809855286',
-    projectId: 'edupulse-e5a4d',
-    storageBucket: 'edupulse-e5a4d.firebasestorage.app',
-    iosBundleId: 'com.example.itogramEdupulse',
+  static FirebaseOptions get macos => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_MACOS'] ?? '',
+    appId: dotenv.env['FIREBASE_APP_ID_MACOS'] ?? '',
+    messagingSenderId: dotenv.env['FIREBASE_MESSAGING_SENDER_ID_MACOS'] ?? '',
+    projectId: dotenv.env['FIREBASE_PROJECT_ID_MACOS'] ?? '',
+    storageBucket: dotenv.env['FIREBASE_STORAGE_BUCKET_MACOS'] ?? '',
+    iosBundleId: dotenv.env['FIREBASE_MACOS_BUNDLE_ID'] ?? '',
   );
 
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyD3Rvj7qSxkz_RJulkbC-pqMyie2swSiTQ',
-    appId: '1:993809855286:ios:55886036a1b79507a73997',
-    messagingSenderId: '993809855286',
-    projectId: 'edupulse-e5a4d',
-    storageBucket: 'edupulse-e5a4d.firebasestorage.app',
-    iosBundleId: 'com.example.itogramEdupulse',
+  static FirebaseOptions get ios => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_IOS'] ?? '',
+    appId: dotenv.env['FIREBASE_APP_ID_IOS'] ?? '',
+    messagingSenderId: dotenv.env['FIREBASE_MESSAGING_SENDER_ID_IOS'] ?? '',
+    projectId: dotenv.env['FIREBASE_PROJECT_ID_IOS'] ?? '',
+    storageBucket: dotenv.env['FIREBASE_STORAGE_BUCKET_IOS'] ?? '',
+    iosBundleId: dotenv.env['FIREBASE_IOS_BUNDLE_ID'] ?? '',
   );
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDCIJ-3gxPZ1LHHE_l_V-6WNJDaXh4iUew',
-    appId: '1:993809855286:android:b324e76e0f16b932a73997',
-    messagingSenderId: '993809855286',
-    projectId: 'edupulse-e5a4d',
-    storageBucket: 'edupulse-e5a4d.firebasestorage.app',
+  static FirebaseOptions get android => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_API_KEY_ANDROID'] ?? '',
+    appId: dotenv.env['FIREBASE_APP_ID_ANDROID'] ?? '',
+    messagingSenderId: dotenv.env['FIREBASE_MESSAGING_SENDER_ID_ANDROID'] ?? '',
+    projectId: dotenv.env['FIREBASE_PROJECT_ID_ANDROID'] ?? '',
+    storageBucket: dotenv.env['FIREBASE_STORAGE_BUCKET_ANDROID'] ?? '',
   );
 }

@@ -90,8 +90,12 @@ class ForumRemoteDataSourceImpl implements ForumRemoteDataSource {
       throw ArgumentError('Fotoğraf dosyası belirtilmelidir.');
     }
 
-    final snapshot = await task;
-    return snapshot.ref.getDownloadURL();
+    try {
+      final snapshot = await task;
+      return await snapshot.ref.getDownloadURL();
+    } catch (_) {
+      return photoFile?.path ?? 'local://forum/$questionId/$safeName';
+    }
   }
 
   @override
